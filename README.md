@@ -1,4 +1,4 @@
-# term_styling
+# term-styling
 
 Script output that reads well everywhere it lands: terminals, pipes, and log files.
 

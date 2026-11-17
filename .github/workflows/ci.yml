@@ -13,8 +13,8 @@ jobs:
       matrix:
         python: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
       - run: uv run --locked --python ${{ matrix.python }} pytest
       - run: uv run --locked --python ${{ matrix.python }} python -m term_styling
       # Callers run the selftest under whatever flags they use; -O must not hollow it out.
@@ -23,8 +23,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
       # Tool versions come from the dev group in uv.lock, and `uv run` syncs the venv ty
       # needs to resolve pytest.
       - run: uv run --locked ruff check .
