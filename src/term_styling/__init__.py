@@ -30,7 +30,7 @@ from typing import NoReturn, TextIO
 
 # A literal, not importlib.metadata, so a vendored copy carries its own version;
 # tests/ checks it against pyproject.toml.
-__version__ = '0.2.0'
+__version__ = '0.2.1'
 # Every tier-1 character the base SYMBOLS and divider() print. A stream whose encoding
 # cannot hold them (a Latin-1 locale, PYTHONIOENCODING=ascii) gets tier 0.
 _PROBE = '✓✗⚠→—✎≡─'
