@@ -1,0 +1,30 @@
+name: Release
+
+# A pushed vX.Y.Z tag publishes to PyPI; a manual run publishes to TestPyPI as a dry run.
+# No tokens: both indexes trust this workflow file through PyPI trusted publishing.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'push' && 'pypi' || 'testpypi' }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Tag matches pyproject version
+        if: github.event_name == 'push'
+        run: test "${GITHUB_REF_NAME#v}" = "$(uv version --short)"
+      - run: uv build --clear
+      - run: uv run --isolated --no-project --with dist/*.whl python -m term_styling
+      - name: Publish to PyPI
+        if: github.event_name == 'push'
+        run: uv publish
+      # --check-url skips files TestPyPI already has, so a rerun on the same version is a no-op.
+      - name: Publish to TestPyPI
+        if: github.event_name == 'workflow_dispatch'
+        run: uv publish --publish-url https://test.pypi.org/legacy/ --check-url https://test.pypi.org/simple/
