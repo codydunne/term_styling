@@ -151,6 +151,14 @@ COLORS = {
     'head': '1',
     'dim': '2',
 }
+# What progress() draws its bar with at each tier that draws one: (done, to do), or
+# (done left, middle, right, to do left, middle, right) for a bar with end caps. The
+# tier 2 set is Fira Code's progress glyphs, which every Nerd Font carries from 3.3
+# (and the Fira Code one from 3.1); with an older font, set BARS[2] = BARS[1].
+BARS = {
+    1: ('━', '━'),
+    2: ('\uee03', '\uee04', '\uee05', '\uee00', '\uee01', '\uee02'),
+}
 # Targets a run could not reach at all, in the order skip() saw them. Not failures -- the
 # rest of the run is still worth doing -- but printed again at the end by the caller,
 # because a skipped target reads like "nothing to do".
@@ -362,6 +370,41 @@ def _clock(seconds: float) -> str:
     return f'{hours}:{minutes:02}:{secs:02}' if hours else f'{minutes}:{secs:02}'
 
 
+def _checked(bar: Sequence[str]) -> tuple[str, ...]:
+    """`bar` as BARS holds one, or ValueError: two glyphs, or six for end caps."""
+    glyphs = tuple(bar)
+    if len(glyphs) not in (2, 6):
+        raise ValueError(f'bar must be 2 or 6 glyphs, not {bar!r}')
+    for glyph in glyphs:
+        # Each fills its own columns on the one line: no empty one, no line break.
+        if not isinstance(glyph, str) or not _width(glyph) or _one_line(glyph) != glyph:
+            raise ValueError(f'bar glyphs must each be one-line text, not {bar!r}')
+    return glyphs
+
+
+def _cells(bar: Sequence[str], count: int, filled: int, t: int) -> str:
+    """A bar `count` glyphs long with the first `filled` done.
+
+    Each glyph is padded to the widest, so a bar of geese and dots keeps its length
+    as it fills. The part to do is dimmed only when it is the same glyph as the part
+    done, where nothing else tells them apart.
+    """
+    done, todo = (bar[:3], bar[3:]) if len(bar) == 6 else ([bar[0]] * 3, [bar[1]] * 3)
+    width = max(_width(glyph) for glyph in bar)
+
+    def cell(i: int) -> str:
+        glyph = (done if i < filled else todo)[
+            0 if i == 0 else 2 if i == count - 1 else 1
+        ]
+        return glyph + ' ' * (width - _width(glyph))
+
+    head = ''.join(cell(i) for i in range(filled))
+    tail = ''.join(cell(i) for i in range(filled, count))
+    if tail and list(done) == list(todo):
+        tail = paint(tail, 'dim', t)
+    return head + tail
+
+
 def _bar(
     done: int,
     total: int | None,
@@ -369,7 +412,7 @@ def _bar(
     t: int,
     columns: int,
     elapsed: float = 0.0,
-    fill: str = '━',
+    bar: Sequence[str] = ('━', '━'),
 ) -> str:
     """One progress line: `label ━━━━━━ 3/10 eta 0:07`, or `label 3 0:02` uncounted.
 
@@ -390,10 +433,10 @@ def _bar(
         # One column spare: a line that reaches the last column wraps on some terminals,
         # and then \r no longer returns to its start.
         size = min(30, columns - 2 - _width(' '.join([*parts, tail])))
-        if size >= 5:
-            done_size = min(size, size * done // total)
-            rest = paint(fill * (size - done_size), 'dim', t)
-            parts.append(fill * done_size + (rest if done_size < size else ''))
+        # A glyph may be two columns wide (an emoji): the bar is counted in glyphs.
+        count = size // max(_width(glyph) for glyph in bar)
+        if size >= 5 and count >= 2:
+            parts.append(_cells(bar, count, min(count, count * done // total), t))
     parts.append(tail)
     return ' '.join(parts)
 
@@ -401,8 +444,11 @@ def _bar(
 class _Bar:
     """One running progress() loop."""
 
-    def __init__(self, label: str, total: int | None, t: int) -> None:
+    def __init__(
+        self, label: str, total: int | None, t: int, bar: Sequence[str]
+    ) -> None:
         self.label, self.total, self.tier = _one_line(label), total, t
+        self.bar = bar
         self.done = 0
         self.start = time.monotonic()
 
@@ -474,7 +520,6 @@ class _Live:
         self.lock = threading.RLock()
         self.bars: list[_Bar] = []
         self.out: TextIO = sys.stderr
-        self.fill = '━'
         self.drawn = 0  # lines on screen
         self.midline = False
         self.busy = False
@@ -492,13 +537,6 @@ class _Live:
                 self.out = out
                 self.midline = self.dead = False
                 self.drawn = 0
-                try:
-                    '━'.encode(getattr(out, 'encoding', None) or 'utf-8')
-                    self.fill = '━'
-                except (LookupError, UnicodeEncodeError):
-                    # Not in _PROBE, so adding the bar took tier 1 from no stream that
-                    # had it; '─' is in _PROBE.
-                    self.fill = '─'
                 if not isinstance(sys.stderr, _Above):
                     sys.stderr = _Above(out)
                 try:
@@ -508,6 +546,12 @@ class _Live:
                 # A piped stdout is not on the screen: left alone.
                 if shared and not isinstance(sys.stdout, _Above):
                     sys.stdout = _Above(sys.stdout)
+            try:
+                ''.join(bar.bar).encode(getattr(self.out, 'encoding', None) or 'utf-8')
+            except (LookupError, UnicodeEncodeError):
+                # The bar's glyphs are not in _PROBE, so they took tier 1 from no stream
+                # that had it; '─' is in _PROBE.
+                bar.bar = ('─', '─')
             self.bars.append(bar)
             self.draw()
 
@@ -573,7 +617,7 @@ class _Live:
                     b.tier,
                     columns,
                     self.last - b.start,
-                    self.fill,
+                    b.bar,
                 )
                 + '\033[K'
                 for b in self.bars
@@ -589,6 +633,7 @@ def progress(
     items: Iterable[_T],
     label: str = '',
     total: int | None = None,
+    bar: Sequence[str] | None = None,
     tier_: int | None = None,
 ) -> Iterator[_T]:
     """Yield `items`, redrawing one progress line on stderr; silent at tier 0.
@@ -604,6 +649,9 @@ def progress(
     finish any half-printed line before the loop. A terminal that stops accepting
     writes ends the drawing, not the loop.
 
+    `bar` replaces the glyphs BARS gives this tier: (done, to do), as in ('#', '.'), or
+    six with end caps as BARS[2] has. A glyph may be two columns wide.
+
     This is a generator, so after a break or an exception the line goes when the
     generator is closed. CPython closes one nothing else refers to at once; the language
     does not promise that, and an iterator you keep holds its line until `.close()`.
@@ -614,6 +662,8 @@ def progress(
     the terminal wraps and smears. Use rich for those.
     """
     t = ERR_TIER if tier_ is None else tier_
+    # Checked at every tier, like a color: a typo fails in a piped test run too.
+    glyphs = _checked(BARS[min(t, 2) or 1] if bar is None else bar)
     if not t or sys.stderr is None:  # pythonw: nowhere to draw
         yield from items
         return
@@ -622,16 +672,16 @@ def progress(
             total = len(items)  # ty: ignore[invalid-argument-type]
         except TypeError:
             pass
-    bar = _Bar(label, total, t)
+    line = _Bar(label, total, t, glyphs)
     try:
-        _LIVE.add(bar)
+        _LIVE.add(line)
         for item in items:
             yield item
-            bar.done += 1
+            line.done += 1
             # Ten redraws a second at most: a tight loop should not spend its time here.
             _LIVE.draw(time.monotonic())
     finally:
-        _LIVE.remove(bar)
+        _LIVE.remove(line)
 
 
 def skip(text: str, outcome: str = 'skipping') -> None:
@@ -746,6 +796,11 @@ def selftest() -> int:
         'sync ' + '━' * 15 + paint('━' * 15, 'dim', 1) + ' 1/2 eta 0:03',
     )
     _same(_bar(3, None, '', 1, 80, 3725), '3 1:02:05')
+    # Every tier's bar is drawable, the caller's included, and an end-capped one caps.
+    for glyphs in BARS.values():
+        _checked(glyphs)
+    _same(_cells('<=>[.]', 4, 2, 1), '<=.]')
+    _same(_cells(('ab', '.'), 3, 1, 1), 'ab. . ')
     _same(list(progress(iter('ab'), tier_=0)), ['a', 'b'])
     _same({'ok', 'fail', 'warn', 'info', 'new', 'dim', 'head'} - set(COLORS), set())
     # Every state, the caller's included: three string forms, and markable at each tier.
@@ -788,6 +843,7 @@ def selftest() -> int:
 
 
 __all__ = [
+    'BARS',
     'COLORS',
     'ERR_TIER',
     'SKIPPED',

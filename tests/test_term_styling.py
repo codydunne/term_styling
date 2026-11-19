@@ -785,6 +785,71 @@ def test_icon_cells_keep_a_table_aligned() -> None:
     assert {term_styling._width(line) for line in lines} == {14}
 
 
+CAPPED = ('\uee03', '\uee04', '\uee05', '\uee00', '\uee01', '\uee02')
+
+
+def test_tier_2_bar_is_the_nerd_font_one_with_end_caps() -> None:
+    assert term_styling.BARS[2] == CAPPED
+    full_l, full, full_r, empty_l, empty, empty_r = CAPPED
+    # Framed glyphs: nothing is dimmed, and each end is a cap whatever its state.
+    assert term_styling._cells(CAPPED, 6, 0, 2) == empty_l + empty * 4 + empty_r
+    assert (
+        term_styling._cells(CAPPED, 6, 3, 2) == full_l + full * 2 + empty * 2 + empty_r
+    )
+    assert term_styling._cells(CAPPED, 6, 6, 2) == full_l + full * 4 + full_r
+    line = term_styling._bar(1, 2, 'sync', 2, 80, 3, CAPPED)
+    assert line == 'sync ' + full_l + full * 14 + empty * 14 + empty_r + ' 1/2 eta 0:03'
+
+
+def test_progress_draws_this_tiers_bar(
+    clock: Clock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for _ in term_styling.progress(range(1), tier_=2):
+        pass
+    assert '\r\uee00' + '\uee01' * 28 + '\uee02 0/1' in capsys.readouterr().err
+    # A Nerd Font older than 3.3 has no such glyphs: the documented way back.
+    monkeypatch.setitem(term_styling.BARS, 2, term_styling.BARS[1])
+    for _ in term_styling.progress(range(1), tier_=2):
+        pass
+    assert '\r' + DIM.format('━' * 30) + ' 0/1' in capsys.readouterr().err
+
+
+def test_progress_with_a_bar_of_wide_glyphs(
+    clock: Clock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    goose = '\U0001fabf'
+    seen = []
+    for item in term_styling.progress(range(3), 'migrating', bar=(goose, '·'), tier_=1):
+        seen.append(item)
+        clock.now += 1
+    frames = [
+        f for f in capsys.readouterr().err.split('\r') if f.startswith('migrating')
+    ]
+    # Fifteen two-column cells: a goose each, or a dot and a space, so the length holds.
+    assert frames[0] == 'migrating ' + '· ' * 15 + ' 0/3\033[K'
+    assert frames[1] == 'migrating ' + goose * 5 + '· ' * 10 + ' 1/3 eta 0:02\033[K'
+    assert frames[3] == 'migrating ' + goose * 15 + ' 3/3\033[K'
+    assert term_styling._width(frames[3]) == term_styling._width(frames[0])
+    assert term_styling._width(goose) == 2  # also where this Python predates the goose
+
+
+@pytest.mark.parametrize(
+    'bar', [(), ('#',), ('#', '.', '-'), ('#', ''), ('#', 'a\nb'), ('#', 5), '#.-']
+)
+def test_progress_bad_bar_fails_at_every_tier(bar: object) -> None:
+    for t in range(3):
+        with pytest.raises(ValueError, match='bar'):
+            list(term_styling.progress(range(1), bar=bar, tier_=t))  # ty: ignore[invalid-argument-type]
+
+
+def test_progress_bar_may_be_a_string_of_glyphs(
+    clock: Clock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for _ in term_styling.progress(range(1), bar='#.', tier_=1):
+        pass
+    assert '\r' + '.' * 30 + ' 0/1' in capsys.readouterr().err
+
+
 def test_bar_without_total_or_room() -> None:
     assert term_styling._bar(7, None, 'scan', 1, 80, 65) == 'scan 7 1:05'
     # An empty run does not divide.

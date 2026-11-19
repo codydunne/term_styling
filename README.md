@@ -207,9 +207,9 @@ Cells are never wrapped or truncated, because a wrapped row is no longer one rec
 
 `progress(items, label='', total=None)` yields the items and redraws one line on **stderr**:
 
-![docs/demo_progress.py with NERD_FONT=1 at tier 2: two nested progress lines with counts and time estimates while results and a warning print above them with Nerd Font glyphs, then a counting line for a stream of unknown length, all erased at the end](docs/demo-progress-tier2.webp)
+![docs/demo_progress.py with NERD_FONT=1 at tier 2: two nested progress lines drawn as framed bars with end caps that fill from the left, with counts and time estimates, while results and a warning print above them with Nerd Font glyphs; then a counting line for a stream of unknown length, all erased at the end](docs/demo-progress-tier2.webp)
 
-The same at tier 1, with Unicode symbols:
+At tier 1 the bar is a heavy rule, dimmed where it is still to do:
 
 ![docs/demo_progress.py on a terminal at tier 1: the same nested progress lines and counting line, with Unicode check marks and warning signs on the results above them](docs/demo-progress-tier1.webp)
 
@@ -256,6 +256,24 @@ Loops may nest or run in threads: each gets its own line, in the order they star
 for course in term_styling.progress(courses, 'courses'):
     for item in term_styling.progress(course.items, course.name):
         sync(item)
+```
+
+#### The bar itself
+
+The bar is drawn with the glyphs in `term_styling.BARS` for the tier: a heavy rule at tier 1, dimmed where it is still to do, and a framed bar with end caps at tier 2.
+The tier 2 glyphs are Fira Code's progress glyphs (U+EE00 to U+EE05), which every Nerd Font carries from version 3.3 and the Fira Code Nerd Font from 3.1.
+With an older Nerd Font they show as missing-glyph boxes; set `term_styling.BARS[2] = term_styling.BARS[1]` to keep the rule.
+
+`bar=` replaces them for one loop: two glyphs, done and to do, or six for a bar with end caps (done left, middle, right, then to do left, middle, right).
+A glyph may be two columns wide, so a flock works:
+
+```python
+for bird in term_styling.progress(flock, 'migrating', bar=('🪿', '·')):
+    fly(bird)
+```
+
+```text
+migrating 🪿🪿🪿🪿🪿· · · · · · · · · ·  5/15 eta 0:01
 ```
 
 ### When to use rich instead

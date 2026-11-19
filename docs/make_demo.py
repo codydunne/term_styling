@@ -13,8 +13,9 @@ with its timing, so the progress line animates. Only what term_styling emits is 
 codes, OSC 8 links, and the carriage return, cursor-up, and erase codes of progress(). The NERD_FONT scene needs
 a Nerd Font: JetBrainsMono Nerd Font Mono is found via fc-list or, under WSL, in the
 Windows font folders (where pwsh's Install-NerdFont puts it), or set DEMO_FONT and
-DEMO_FONT_BOLD to another's files. Characters that font lacks are drawn from DejaVu Sans
-Mono; a character neither has is an error.
+DEMO_FONT_BOLD to another's files. It has to be Nerd Fonts 3.3 or newer (3.1 for Fira
+Code), which is where the tier 2 progress bar's glyphs arrived. Characters that font lacks
+are drawn from DejaVu Sans Mono; a character neither has is an error.
 """
 
 import codecs
