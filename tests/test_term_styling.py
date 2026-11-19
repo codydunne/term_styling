@@ -283,11 +283,17 @@ def test_changelog_leads_with_current_version():
     # Newest entry first, so a bump without a changelog entry (or one added below an
     # older entry) fails here instead of shipping.
     changelog = (REPO / 'CHANGELOG.md').read_text(encoding='utf-8')
-    headings = re.findall(r'^## (\S+) — (\S+)$', changelog, flags=re.MULTILINE)
-    assert headings, 'CHANGELOG.md has no "## X.Y.Z — YYYY-MM-DD" entry'
-    version, released = headings[0]
-    assert version == term_styling.__version__
-    date.fromisoformat(released)
+    # Every level-2 heading must parse, so a malformed newest entry cannot be skipped in
+    # favour of an older well-formed one.
+    lines = re.findall(r'^## .*$', changelog, flags=re.MULTILINE)
+    assert lines, 'CHANGELOG.md has no "## X.Y.Z — YYYY-MM-DD" entry'
+    headings: list[tuple[str, str]] = []
+    for line in lines:
+        match = re.fullmatch(r'## (\S+) — (\S+)', line)
+        assert match, f'malformed CHANGELOG.md heading: {line!r}'
+        date.fromisoformat(match[2])
+        headings.append((match[1], match[2]))
+    assert headings[0][0] == term_styling.__version__
     versions = [v for v, _ in headings]
     assert len(versions) == len(set(versions)), 'duplicate CHANGELOG.md entries'
 
@@ -301,7 +307,7 @@ def test_readme_names_current_version():
     assert set(tags) == {term_styling.__version__}
 
     # The install snippets cap the range; a bump past the cap must move them.
-    caps = re.findall(r'term-styling>=([\d.]+),<([\d.]+)', readme)
+    caps = re.findall(r'term-styling\s*>=\s*([\d.]+)\s*,\s*<\s*([\d.]+)', readme)
     assert caps, 'README.md no longer shows a capped install requirement'
     for low, high in caps:
         assert _release_tuple(low) <= current < _release_tuple(high), (low, high)
