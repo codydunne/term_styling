@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from collections.abc import Iterator
 
 import pytest
 
@@ -350,6 +351,8 @@ def test_width_ignores_other_libraries_escapes(styled: str) -> None:
         ('\033(B\033[mab', 2),  # tput sgr0
         ('\033[>4;1mab\033[2~', 2),  # private parameters, a non-letter final byte
         ('\033Mab', 2),  # a two-byte escape
+        ('\033^hidden\033\\x', 1),  # a privacy message: a hidden string
+        ('\033Pq#0\033\\ab', 2),  # ...and a device control string
         ('a\ufe0f', 1),  # a letter has no emoji form
         ('\xa9\ufe0f', 2),  # ...but the copyright sign has
         ('\u2122\ufe0f\u2139\ufe0f\u203c\ufe0f', 6),
@@ -377,6 +380,14 @@ def test_table_keeps_another_librarys_escapes_whole() -> None:
     assert term_styling.table([(bel, 'x'), ('abcd', 'y')], tier_=1) == (
         f'{bel}    x\nabcd  y'
     )
+
+
+def test_table_scrubs_a_broken_escape() -> None:
+    # Cancelled before its end: what is left would hold the terminal in string mode
+    # and swallow the cells and rows after it.
+    out = term_styling.table([('\033]0;t\x18shown\a', 'x')], tier_=1)
+    assert out == ' ]0;t shown   x'
+    assert term_styling.table([('\033[31', 'x')], tier_=1) == ' [31  x'
 
 
 def test_table_none_cell_follows_the_tier() -> None:
@@ -609,7 +620,24 @@ def test_stand_in_is_the_stream_for_everything_but_writing(
         sys.stderr.writelines(['a\n', 'b\n'])
     bar0 = '\r' + DIM.format('━' * 30) + ' 0/1\033[K'
     # writelines goes above the bar like any other write.
-    assert screen.getvalue() == bar0 + ERASE + 'a\nb\n' + bar0 + ERASE
+    assert screen.getvalue() == (
+        bar0 + ERASE + 'a\n' + bar0 + ERASE + 'b\n' + bar0 + ERASE
+    )
+
+
+def test_stand_in_writelines_keeps_lines_written_before_an_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def lines() -> Iterator[str]:
+        yield 'started\n'
+        raise RuntimeError('source failed')
+
+    screen = FakeTTY()
+    monkeypatch.setattr(sys, 'stderr', screen)
+    for _ in term_styling.progress(range(1), tier_=1):
+        with pytest.raises(RuntimeError, match='source failed'):
+            sys.stderr.writelines(lines())
+    assert 'started\n' in screen.getvalue()
 
 
 def test_terminal_stdout_and_stderr_are_both_wrapped(

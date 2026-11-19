@@ -198,18 +198,21 @@ def divider(tier_: int | None = None) -> str:
 
 # What paint() and link() wrap around text: zero columns wide on screen.
 _NO_WIDTH = ('Mn', 'Me', 'Cf')
-# Escapes fill no columns: any CSI sequence, any OSC string, and the two- and
-# three-byte escapes (`tput sgr0` sends ESC ( B), so a cell another library styled
+# Escapes fill no columns: any CSI sequence, any OSC or other control string (DCS,
+# SOS, PM, APC, whose text a terminal hides), and the two- and three-byte escapes (`tput sgr0` sends ESC ( B), so a cell another library styled
 # measures right too. A control character ends an OSC string early on a terminal,
 # so one inside is no part of the escape here either.
 _ESCAPE = re.compile(
     r'\033\[[0-?]*[ -/]*[@-~]'
     r'|\033\][^\x00-\x1f\x7f-\x9f]*(?:\033\\|\a)'
+    r'|\033[PX^_][^\033]*\033\\'
     r'|\033[()*+][0-9A-Za-z]'
     r'|\033[@-Z\\^_]'
 )
-# Every C0 and C1 control but ESC, and the two Unicode line breaks.
-_CONTROL = re.compile(r'\r\n|[\x00-\x1a\x1c-\x1f\x7f-\x9f\u2028\u2029]')
+# Every C0 and C1 control and the two Unicode line breaks. ESC too: _one_line()
+# applies this only between whole escapes, where an ESC is the start of a broken
+# one that would leave the terminal waiting for its end.
+_CONTROL = re.compile(r'\r\n|[\x00-\x1f\x7f-\x9f\u2028\u2029]')
 
 
 def _one_line(text: object) -> str:
@@ -408,7 +411,10 @@ class _Above:
             return written
 
     def writelines(self, lines: Iterable[str]) -> None:
-        self.write(''.join(lines))
+        # One at a time, as a stream does: lines already written stay written if
+        # the iterable then raises.
+        for line in lines:
+            self.write(line)
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._stream, name)
