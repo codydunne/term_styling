@@ -4,13 +4,12 @@
 # ///
 """Record the demo animations: `uv run docs/make_demo.py` (Linux/macOS, needs a pty).
 
-    uv run docs/make_demo.py                      # all nine, into docs/
-    uv run docs/make_demo.py demo-table-tier2     # only the ones named
+    uv run docs/make_demo.py                      # all three, into docs/
+    uv run docs/make_demo.py demo-tier2           # only the ones named
     uv run docs/make_demo.py --out /tmp/media     # somewhere else
 
-One animation per tier for each script: demo-tier{0,1,2}.webp from demo.py,
-demo-table-tier{0,1,2}.webp from demo_table.py, and demo-progress-tier{0,1,2}.webp from
-demo_progress.py. They are not kept on main: .github/workflows/media.yml runs this on a
+One animation per tier, demo-tier{0,1,2}.webp, all from demo.py. They are not kept on
+main: .github/workflows/media.yml runs this on a
 release tag and replaces the `media` branch, which the README links to.
 
 Runs each script under a real pseudo-terminal once per command and replays the captured
@@ -43,7 +42,7 @@ from fontTools.ttLib import TTFont
 from PIL import Image, ImageDraw, ImageFont
 
 HERE = Path(__file__).parent
-COLS, ROWS, FONT_SIZE, PAD = 72, 28, 30, 30
+COLS, ROWS, FONT_SIZE, PAD = 72, 30, 30, 30
 DEJAVU = '/usr/share/fonts/truetype/dejavu/DejaVuSansMono'
 FAMILY = 'JetBrainsMono Nerd Font Mono'
 BG, FG = (30, 30, 36), (220, 220, 220)
@@ -68,8 +67,7 @@ BURST = 0.05
 STEP = 50
 # One animation per file, written to <name>.webp. Each scene starts on a cleared screen:
 # (typed command, comment shown after it) pairs. The log file keeps the redirect scene
-# deterministic: `| cat` would race cat against stderr. The table demo writes to stdout
-# alone, so its pipes are safe.
+# deterministic: `| cat` would race cat against stderr.
 ANIMATIONS = {
     'demo-tier0': [
         [('NO_COLOR=1 uv run python demo.py', '# tier 0 on both streams')],
@@ -81,25 +79,6 @@ ANIMATIONS = {
     'demo-tier1': [[('uv run python demo.py', '# a terminal: tier 1')]],
     'demo-tier2': [
         [('NERD_FONT=1 uv run python demo.py', '# tier 2: Nerd Font glyphs')]
-    ],
-    'demo-table-tier0': [
-        [
-            ('uv run python demo_table.py | cat', '# piped: plain records'),
-            ("uv run python demo_table.py | grep -F '[unpub]'", '# ...for grep'),
-        ]
-    ],
-    'demo-table-tier1': [[('uv run python demo_table.py', '# a terminal: tier 1')]],
-    'demo-table-tier2': [
-        [('NERD_FONT=1 uv run python demo_table.py', '# tier 2: an icon per cell')]
-    ],
-    'demo-progress-tier0': [
-        [('NO_COLOR=1 uv run python demo_progress.py', '# tier 0: no lines drawn')]
-    ],
-    'demo-progress-tier1': [
-        [('uv run python demo_progress.py', '# a line per loop, output above')]
-    ],
-    'demo-progress-tier2': [
-        [('NERD_FONT=1 uv run python demo_progress.py', '# tier 2: Nerd Font glyphs')]
     ],
 }
 

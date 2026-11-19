@@ -10,13 +10,11 @@ Script output that reads well everywhere it lands: terminals, pipes, and log fil
 - 🔀 **Per-stream detection**: piped stdout and terminal stderr each style correctly
 - 🐍 **Standard library only**, Python 3.9+
 
-![docs/demo.py with NERD_FONT=1 at tier 2: a progress line under the results as they print, then Nerd Font glyphs, colors, dimmed old values, underlined links, and a summary table](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-tier2.webp)
+![docs/demo.py with NERD_FONT=1 at tier 2: a course-site sync with branch, cloud, and tag icons in the title, two nested progress bars drawn as framed bars while results and a warning print above them, dimmed old values, underlined links, and a table with an icon in nearly every cell](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-tier2.webp)
 
 See the same script for [the other displayed tiers 0 and 1](#tiers).
 
-There are two more demos further down: [tables](#tables), the counterpart of `uv run python -m rich.table`, and [progress lines](#progress), the counterpart of `uv run python -m rich.progress`.
-
-(The recordings are kept on the [`media` branch](https://github.com/codydunne/term_styling/tree/media), not on `main`, and are rebuilt from the demo scripts by the [Media workflow](https://github.com/codydunne/term_styling/blob/main/.github/workflows/media.yml) on each release tag. To record them yourself: `uv run docs/make_demo.py`, or `uv run docs/make_demo.py demo-table-tier2` for one; set `DEMO_FONT` and `DEMO_FONT_BOLD` to a Nerd Font, 3.3 or newer, for tier 2.)
+(The recordings are kept on the [`media` branch](https://github.com/codydunne/term_styling/tree/media), not on `main`, and are rebuilt from the demo scripts by the [Media workflow](https://github.com/codydunne/term_styling/blob/main/.github/workflows/media.yml) on each release tag. To record them yourself: `uv run docs/make_demo.py`, or `uv run docs/make_demo.py demo-tier2` for one; set `DEMO_FONT` and `DEMO_FONT_BOLD` to a Nerd Font, 3.3 or newer, for tier 2.)
 
 ## Install
 
@@ -69,27 +67,27 @@ It has no imports outside the standard library, and `uv run term_styling.py` run
 
 With `NO_COLOR=1` and then with stdout redirected to a log while stderr stays on the terminal:
 
-![docs/demo.py at tier 0: with NO_COLOR=1 both streams are plain ASCII; redirected to sync.log, the progress line and stderr stay styled and the log holds ASCII, the table as plain rows](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-tier0.webp)
+![docs/demo.py at tier 0: with NO_COLOR=1 both streams are plain ASCII and no progress lines are drawn; redirected to sync.log, the progress lines and stderr stay styled and the log holds ASCII, the table as plain rows with bracketed states](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-tier0.webp)
 
 
 ### Tier 1 
 
 In a terminal without a Nerd Font:
 
-![docs/demo.py in a terminal at tier 1: unicode symbols in place of the Nerd Font glyphs, with the same progress line and table](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-tier1.webp)
+![docs/demo.py in a terminal at tier 1: the same run with Unicode symbols, heavy-rule progress bars, no icons for folders, people, or times, and colored dots for document states](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-tier1.webp)
 
 ### Tier 2: Enabling Top-Tier Formatting
 
 Install a [Nerd Font](https://www.nerdfonts.com/font-downloads), select it as your terminal's font, and set `NERD_FONT=1`:
 
-![docs/demo.py with NERD_FONT=1 at tier 2: a progress line under the results as they print, then Nerd Font glyphs, colors, dimmed old values, underlined links, and a summary table](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-tier2.webp)
+![docs/demo.py with NERD_FONT=1 at tier 2: a course-site sync with branch, cloud, and tag icons in the title, two nested progress bars drawn as framed bars while results and a warning print above them, dimmed old values, underlined links, and a table with an icon in nearly every cell](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-tier2.webp)
 
 (Duplicate of the animation at the top.)
 
 Tier 2 changes two things.
 The outcome states (`ok`, `fail`, `warn`, ...) swap a Unicode symbol for a Font Awesome one, which is cosmetic.
 The thing states (`folder`, `branch`, `time`, `date`, `user`, `lock`, `cloud`, `tag`, `bug`) are where a Nerd Font earns its place: Unicode's only signs for them are double-width color emoji, so at tiers 0 and 1 `mark('folder', 'lectures/')` is the text alone, and at tier 2 it gains the icon.
-The [table demo](#tables) shows the same listing at each tier.
+The demo's table has one in nearly every cell: compare it at [tier 1](#tier-1) and tier 2.
 
 ### Installing Nerd Fonts
 
@@ -128,7 +126,7 @@ Tier 0 keeps this module's own output ASCII, but a caller's text (a title with a
 
 ```python
 import term_styling
-from term_styling import change, divider, link, mark, paint
+from term_styling import change, divider, link, mark, paint, progress, table
 
 print(divider())
 print(mark('ok', '5 in sync'))
@@ -136,6 +134,21 @@ print(mark('warn', 'points differ'))
 print(change('due_at', '2026-09-17 23:59', '2026-09-18 23:59'))
 print(link('https://example.org/a1', 'A1'))
 print(paint('dimmed', 'dim'))
+
+# Things as well as outcomes: an icon with a Nerd Font, the text alone without one.
+print(mark('folder', 'lectures/'), mark('user', 'cody'), mark('time', '09:12'))
+
+# A line on stderr while the loop runs; whatever prints meanwhile lands above it.
+for path in progress(paths, 'uploading'):
+    upload(path)
+
+# Aligned columns on a terminal, plain records in a pipe.
+rows = [
+    (mark('file', 'syllabus.md'), 1840, mark('published', 'published')),
+    (mark('file', 'a2-color.md'), 540, mark('held', 'held for review')),
+    (mark('lock', 'grades.csv'), None, mark('unpublished', 'unpublished')),
+]
+print(table(rows, headers=('document', 'words', 'state'), align='lr'))
 
 term_styling.warn('one yellow line on stderr')
 term_styling.skip('no API_TOKEN')  # red on stderr, and recorded
@@ -168,17 +181,7 @@ term_styling.COLORS.update({'archived': '2'})
 
 `table(rows, headers=None, align='')` returns the rows as aligned columns, one line per row at every tier.
 
-With a Nerd Font (tier 2), every cell gains an icon and the columns still line up:
-
-![docs/demo_table.py with NERD_FONT=1: a document listing as a table with a bold header and dim rule, an icon in each cell (folder, file, lock, bug, person, clock, eye for published, crossed eye for unpublished, pause for held), and a branch, cloud, and tag icon in the title line](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-table-tier2.webp)
-
-On a terminal without one (tier 1), folders, owners, and times are the text alone and the states are colored dots:
-
-![docs/demo_table.py on a terminal at tier 1: the same table with no icons for folders, people, or times, and green, hollow, and half-filled dots for published, unpublished, and held](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-table-tier1.webp)
-
-Piped (tier 0), the same call prints plain records:
-
-![docs/demo_table.py at tier 0: piped through cat the table is space-padded ASCII rows with bracketed states, and piped through grep for the unpublished state it is the one matching row](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-table-tier0.webp)
+The [demo at the top](#term-styling) ends with one, and the [tier 0 recording](#tier-0) shows the same table piped.
 
 ```python
 rows = [
@@ -209,15 +212,7 @@ Cells are never wrapped or truncated, because a wrapped row is no longer one rec
 
 `progress(items, label='', total=None)` yields the items and redraws one line on **stderr**:
 
-![docs/demo_progress.py with NERD_FONT=1 at tier 2: two nested progress lines drawn as framed bars with end caps that fill from the left, with counts and time estimates, while results and a warning print above them with Nerd Font glyphs; then a counting line for a stream of unknown length, all erased at the end](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-progress-tier2.webp)
-
-At tier 1 the bar is a heavy rule, dimmed where it is still to do:
-
-![docs/demo_progress.py on a terminal at tier 1: the same nested progress lines and counting line, with Unicode check marks and warning signs on the results above them](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-progress-tier1.webp)
-
-At tier 0 no line is drawn at all:
-
-![docs/demo_progress.py with NO_COLOR=1 at tier 0: only the results print, as plain ASCII lines, with no progress lines](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-progress-tier0.webp)
+The demos at the top and under [Tiers](#tiers) run two nested loops this way.
 
 ```python
 for path in term_styling.progress(paths, 'uploading'):
