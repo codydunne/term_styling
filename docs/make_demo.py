@@ -270,9 +270,16 @@ def main() -> int:
                     img.paste(tile(c), (px, py + (ch - tile(c).height) // 2), tile(c))
                     continue
                 if ord(c) not in drawable:
+                    hint = (
+                        ''
+                        if emoji_file
+                        else '\nIf it is an emoji, install Noto Color'
+                        ' Emoji (Debian/Ubuntu: sudo apt-get install'
+                        ' fonts-noto-color-emoji) or set DEMO_FONT_EMOJI.'
+                    )
                     sys.exit(
                         f'{font}, DejaVu Sans Mono, and {emoji_file or "no emoji font"}'
-                        f' all lack U+{ord(c):04X}'
+                        f' all lack U+{ord(c):04X} {unicodedata.name(c, "")}{hint}'
                     )
                 face = (fonts if ord(c) in covered else fallback)[bold]
                 d.text((px, py), c, font=face, fill=color)
