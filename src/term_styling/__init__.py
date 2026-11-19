@@ -571,9 +571,9 @@ def progress(
     """Yield `items`, redrawing one progress line on stderr; silent at tier 0.
 
     On stderr and at ERR_TIER, so a piped stdout stays data and a log never collects
-    redraws. The line is erased when the loop ends, breaks, or raises: print the outcome
-    yourself with mark(). `total` defaults to len(items); without either, it counts and
-    shows the time elapsed instead of an estimate.
+    redraws. The line is erased when the loop runs to its end (after a break or an
+    exception, see below): print the outcome yourself with mark(). `total` defaults to
+    len(items); without either, it counts and shows the time elapsed, not an estimate.
 
     While a loop runs, sys.stderr (and sys.stdout, when it is a terminal too) is wrapped
     so that anything printed appears above the line. Loops may nest or run in threads:
