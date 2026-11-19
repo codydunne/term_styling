@@ -19,6 +19,8 @@ jobs:
       - name: Tag matches pyproject version
         if: github.event_name == 'push'
         run: test "${GITHUB_REF_NAME#v}" = "$(uv version --short)"
+      # Includes the checks that CHANGELOG.md and README.md name this version.
+      - run: uv run --locked pytest
       - run: uv build --clear
       - run: uv run --isolated --no-project --with dist/*.whl python -m term_styling
       - name: Publish to PyPI
