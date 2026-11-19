@@ -354,7 +354,7 @@ One-time setup, then the same steps as every later release:
    uv run --isolated --no-project --index https://test.pypi.org/simple/ --with term-styling==$(uv version --short) python -m term_styling
    ```
 
-4. Tag the green commit and push the tag. The workflow checks that the tag matches `pyproject.toml`, runs the tests, builds, runs the selftest on the wheel, and publishes:
+4. Tag the green commit and push the tag. The workflow checks that the tag matches `pyproject.toml`, runs the tests, builds, runs the selftest on the wheel, publishes, and creates a GitHub release with the wheel, sdist, and the version's `CHANGELOG.md` entry:
 
    ```bash
    git tag -a "v$(uv version --short)" -m "term-styling $(uv version --short)" && git push origin "v$(uv version --short)"

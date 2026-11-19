@@ -13,6 +13,7 @@ jobs:
     environment: ${{ github.event_name == 'push' && 'pypi' || 'testpypi' }}
     permissions:
       id-token: write
+      contents: write  # gh release create
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.3
@@ -30,3 +31,11 @@ jobs:
       - name: Publish to TestPyPI
         if: github.event_name == 'workflow_dispatch'
         run: uv publish --publish-url https://test.pypi.org/legacy/ --check-url https://test.pypi.org/simple/
+      # The tag already exists (it triggered this run); --verify-tag refuses to create one.
+      - name: GitHub release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          awk '/^## /{n++} n==1' CHANGELOG.md | tail -n +2 > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "term-styling ${GITHUB_REF_NAME#v}" --notes-file notes.md
