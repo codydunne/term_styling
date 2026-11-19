@@ -2,9 +2,12 @@
 # requires-python = ">=3.9"
 # dependencies = ["pillow", "fonttools"]
 # ///
-"""Regenerate docs/demo-tier{0,1,2}.webp: `uv run docs/make_demo.py` (Linux/macOS, needs a pty).
+"""Regenerate the animations in docs/: `uv run docs/make_demo.py` (Linux/macOS, needs a pty).
 
-Runs demo.py under a real pseudo-terminal once per command and replays the captured output
+Writes demo-tier{0,1,2}.webp from demo.py, demo-table.webp from demo_table.py, and
+demo-progress.webp from demo_progress.py.
+
+Runs each script under a real pseudo-terminal once per command and replays the captured output
 with its timing, so the progress line animates. Only what term_styling emits is parsed: SGR
 codes, OSC 8 links, and the carriage return, cursor-up, and erase codes of progress(). The NERD_FONT scene needs
 a Nerd Font: JetBrainsMono Nerd Font Mono is found via fc-list or, under WSL, in the
@@ -28,7 +31,7 @@ from fontTools.ttLib import TTFont
 from PIL import Image, ImageDraw, ImageFont
 
 HERE = Path(__file__).parent
-COLS, ROWS, FONT_SIZE, PAD = 72, 26, 30, 30
+COLS, ROWS, FONT_SIZE, PAD = 72, 28, 30, 30
 DEJAVU = '/usr/share/fonts/truetype/dejavu/DejaVuSansMono'
 FAMILY = 'JetBrainsMono Nerd Font Mono'
 BG, FG = (30, 30, 36), (220, 220, 220)
@@ -48,19 +51,33 @@ PARTIAL = re.compile(r'\x1b(?:\[\d*|\]8;;[^\x1b]*\x1b?)?$')
 # Output arriving within this many seconds is one frame: a burst of print() calls is not
 # worth a frame each, and a redraw is never split from its erase.
 BURST = 0.05
-# One animation per tier, written to demo-tier<N>.webp. Each scene starts on a cleared
-# screen: (typed command, comment shown after it) pairs. The log file keeps the redirect
-# scene deterministic: `| cat` would race cat against stderr.
+# One animation per file, written to <name>.webp. Each scene starts on a cleared screen:
+# (typed command, comment shown after it) pairs. The log file keeps the redirect scene
+# deterministic: `| cat` would race cat against stderr. The table demo writes to stdout
+# alone, so its pipes are safe.
 ANIMATIONS = {
-    0: [
+    'demo-tier0': [
         [('NO_COLOR=1 uv run python demo.py', '# tier 0 on both streams')],
         [
             ('uv run python demo.py > sync.log', '# stderr is still a terminal'),
             ('cat sync.log', '# stdout was not: tier 0'),
         ],
     ],
-    1: [[('uv run python demo.py', '# a terminal: tier 1')]],
-    2: [[('NERD_FONT=1 uv run python demo.py', '# tier 2: Nerd Font glyphs')]],
+    'demo-tier1': [[('uv run python demo.py', '# a terminal: tier 1')]],
+    'demo-tier2': [
+        [('NERD_FONT=1 uv run python demo.py', '# tier 2: Nerd Font glyphs')]
+    ],
+    'demo-table': [
+        [
+            ('uv run python demo_table.py', '# a terminal'),
+            ('uv run python demo_table.py | cat', '# piped: plain records'),
+            ("uv run python demo_table.py | grep -F '[!]'", '# ...for grep'),
+        ]
+    ],
+    'demo-progress': [
+        [('uv run python demo_progress.py', '# a line per loop, output above')],
+        [('uv run python demo_progress.py 2> sync.log', '# stderr piped: no lines')],
+    ],
 }
 
 
@@ -213,11 +230,14 @@ def main() -> int:
         return img
 
     with tempfile.TemporaryDirectory() as cwd:
-        shutil.copy(HERE / 'demo.py', cwd)
+        for script in HERE.glob('demo*.py'):
+            shutil.copy(script, cwd)
         # Render every tier before saving any, so a missing glyph leaves no file half-updated.
-        renders = {n: render(scenes, draw, cwd) for n, scenes in ANIMATIONS.items()}
-    for n, (frames, durations) in renders.items():
-        save(HERE / f'demo-tier{n}.webp', frames, durations)
+        renders = {
+            name: render(scenes, draw, cwd) for name, scenes in ANIMATIONS.items()
+        }
+    for name, (frames, durations) in renders.items():
+        save(HERE / f'{name}.webp', frames, durations)
     return 0
 
 

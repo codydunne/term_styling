@@ -14,7 +14,9 @@ Script output that reads well everywhere it lands: terminals, pipes, and log fil
 
 See the same script for [the other displayed tiers 0 and 1](#tiers).
 
-(Regenerate all three animations with `uv run docs/make_demo.py`; set `DEMO_FONT` and `DEMO_FONT_BOLD` to a Nerd Font for tier 2.)
+There are two more demos further down: [tables](#tables), the counterpart of `python -m rich.table`, and [progress lines](#progress), the counterpart of `python -m rich.progress`.
+
+(Regenerate all five animations with `uv run docs/make_demo.py`; set `DEMO_FONT` and `DEMO_FONT_BOLD` to a Nerd Font for tier 2.)
 
 ## Install
 
@@ -148,6 +150,8 @@ term_styling.COLORS.update({'held': '33'})
 
 `table(rows, headers=None, align='')` returns the rows as aligned columns, one line per row at every tier.
 
+![docs/demo_table.py: on a terminal a table with a bold header, a dim rule, clickable ids, right-aligned points, and colored states; piped through cat the same table as plain space-padded rows with the URLs written out; piped through grep a single matching row](docs/demo-table.webp)
+
 ```python
 rows = [
     ('A1', 10, mark('ok', 'in sync')),
@@ -176,6 +180,8 @@ Cells are never wrapped or truncated, because a wrapped row is no longer one rec
 ### Progress
 
 `progress(items, label='', total=None)` yields the items and redraws one line on **stderr**:
+
+![docs/demo_progress.py: two nested progress lines with counts and time estimates while results and a warning print above them, then a counting line for a stream of unknown length, all erased at the end; with stderr redirected, only the results print](docs/demo-progress.webp)
 
 ```python
 for path in term_styling.progress(paths, 'uploading'):

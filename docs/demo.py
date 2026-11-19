@@ -57,3 +57,5 @@ print(
     )
 )
 print(paint('skipped:', 'head'), *term_styling.SKIPPED, sep='\n  ')
+# One red line on stderr, then exit: the run's status is the caller's to act on.
+term_styling.die('1 rejected, 1 skipped', code=1)
