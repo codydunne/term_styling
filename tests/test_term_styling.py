@@ -388,6 +388,11 @@ def test_table_scrubs_a_broken_escape() -> None:
     out = term_styling.table([('\033]0;t\x18shown\a', 'x')], tier_=1)
     assert out == ' ]0;t shown   x'
     assert term_styling.table([('\033[31', 'x')], tier_=1) == ' [31  x'
+    # CAN cancels a privacy message too: a terminal shows what follows it.
+    cancelled = '\033^hidden\x18shown\033\\'
+    lines = term_styling.table([(cancelled, 'x'), ('12345', 'y')], tier_=1).splitlines()
+    assert lines[0].startswith(' ^hidden shown')
+    assert [term_styling._width(line) for line in lines] == [17, 17]
 
 
 def test_table_none_cell_follows_the_tier() -> None:

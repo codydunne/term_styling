@@ -205,9 +205,11 @@ _NO_WIDTH = ('Mn', 'Me', 'Cf')
 _ESCAPE = re.compile(
     r'\033\[[0-?]*[ -/]*[@-~]'
     r'|\033\][^\x00-\x1f\x7f-\x9f]*(?:\033\\|\a)'
-    r'|\033[PX^_][^\033]*\033\\'
+    r'|\033[PX^_][^\x00-\x1f\x7f-\x9f]*\033\\'
     r'|\033[()*+][0-9A-Za-z]'
-    r'|\033[@-Z\\^_]'
+    # The string introducers are no escape alone: one left unmatched above was cut
+    # short, and passing it through would hide everything after it.
+    r'|\033[@-OQ-WYZ\\]'
 )
 # Every C0 and C1 control and the two Unicode line breaks. ESC too: _one_line()
 # applies this only between whole escapes, where an ESC is the start of a broken
