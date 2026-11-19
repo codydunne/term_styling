@@ -14,7 +14,7 @@ Script output that reads well everywhere it lands: terminals, pipes, and log fil
 
 See the same script for [the other displayed tiers 0 and 1](#tiers).
 
-There are two more demos further down: [tables](#tables), the counterpart of `python -m rich.table`, and [progress lines](#progress), the counterpart of `python -m rich.progress`.
+There are two more demos further down: [tables](#tables), the counterpart of `uv runpython -m rich.table`, and [progress lines](#progress), the counterpart of `uv run python -m rich.progress`.
 
 (Regenerate all five animations with `uv run docs/make_demo.py`; set `DEMO_FONT` and `DEMO_FONT_BOLD` to a Nerd Font for tier 2.)
 
@@ -80,9 +80,11 @@ In a terminal without a Nerd Font:
 
 ### Tier 2: Enabling Top-Tier Formatting
 
-See the demo at the top!
+Install a [Nerd Font](https://www.nerdfonts.com/font-downloads), select it as your terminal's font, and set `NERD_FONT=1`:
 
-Install a [Nerd Font](https://www.nerdfonts.com/font-downloads), select it as your terminal's font, and set `NERD_FONT=1`.
+![docs/demo.py with NERD_FONT=1 at tier 2: a progress line under the results as they print, then Nerd Font glyphs, colors, dimmed old values, underlined links, and a summary table](docs/demo-tier2.webp)
+
+(Duplicate of the animation at the top.)
 
 **macOS:**
 
