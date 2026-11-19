@@ -227,6 +227,110 @@ def test_extended_states(monkeypatch: pytest.MonkeyPatch) -> None:
     assert term_styling.mark('live', 'page', 1) == '\033[32m● page\033[0m'
 
 
+def test_table_plain_is_records_only() -> None:
+    out = term_styling.table(
+        [('A1', 10, 'in sync'), ('A22', 5), ('A3', None, 'two\nlines')],
+        headers=('id', 'pts', 'state'),
+        align='lr',
+        tier_=0,
+    )
+    assert out.splitlines() == [
+        'id   pts  state',
+        'A1    10  in sync',
+        'A22    5',  # a short row is padded, and no line ends in spaces
+        'A3     -  two lines',
+    ]
+    assert out.isascii()
+
+
+def test_table_terminal_has_bold_header_and_rule() -> None:
+    out = term_styling.table([('A1', 10)], ('id', 'pts'), 'lr', tier_=1)
+    assert out.splitlines() == [
+        '\033[1mid\033[0m  \033[1mpts\033[0m',
+        '\033[2m──  ───\033[0m',
+        'A1   10',
+    ]
+
+
+def test_table_styled_and_wide_cells_stay_aligned() -> None:
+    rows = [
+        (term_styling.mark('ok', 'A1', 1), 'x'),
+        (term_styling.link('http://example.org', 'A22', 1), 'x'),
+        ('日本', 'x'),
+        ('e\u0301', 'x'),  # combining accent: one column
+    ]
+    lines = term_styling.table(rows, tier_=1).splitlines()
+    assert {term_styling._width(line) for line in lines} == {7}
+    assert all(line.endswith('  x') for line in lines)
+
+
+def test_table_without_headers_or_rows() -> None:
+    assert term_styling.table([('a', 'b')], tier_=1) == 'a  b'
+    assert term_styling.table([], tier_=0) == ''
+    assert term_styling.table([], ('id',), tier_=0) == 'id'
+
+
+def test_table_follows_pinned_tier(plain: None) -> None:
+    assert term_styling.table([(None,)], ('x',)) == 'x\n-'
+
+
+def test_table_bad_align_fails_at_every_tier() -> None:
+    for t in range(3):
+        with pytest.raises(ValueError, match='align'):
+            term_styling.table([('a',)], align='c', tier_=t)
+
+
+def test_progress_is_silent_when_plain(
+    plain: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert list(term_styling.progress(range(3), 'sync')) == [0, 1, 2]
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == ('', '')
+
+
+def test_progress_draws_on_stderr_and_erases(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv('COLUMNS', '80')
+    monkeypatch.setattr(term_styling.time, 'monotonic', iter(range(10)).__next__)
+    assert list(term_styling.progress(['a', 'b'], 'sync', tier_=1)) == ['a', 'b']
+    captured = capsys.readouterr()
+    assert captured.out == ''
+    dim = '\033[2m{}\033[0m'
+    assert captured.err == (
+        '\rsync ' + dim.format('━' * 30) + ' 0/2\033[K'
+        '\rsync ' + '━' * 15 + dim.format('━' * 15) + ' 1/2\033[K'
+        '\r\033[K'
+    )
+
+
+def test_progress_throttles_redraws(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(term_styling.time, 'monotonic', lambda: 5.0)
+    assert sum(term_styling.progress(range(1000), tier_=1)) == 499500
+    assert capsys.readouterr().err.count('\r') == 2  # one draw, one erase
+
+
+def test_progress_erases_on_break_and_error(capsys: pytest.CaptureFixture[str]) -> None:
+    for item in term_styling.progress(range(5), tier_=1):
+        if item == 1:
+            break
+    assert capsys.readouterr().err.endswith('\r\033[K')
+    with pytest.raises(ZeroDivisionError):
+        for item in term_styling.progress(range(5), tier_=1):
+            1 / item
+    assert capsys.readouterr().err.endswith('\r\033[K')
+
+
+def test_bar_without_total_or_room() -> None:
+    assert term_styling._bar(7, None, 'scan', 1, 80) == 'scan 7'
+    assert term_styling._bar(0, 0, '', 1, 80) == '0'  # an empty run does not divide
+    assert term_styling._bar(1, 2, 'sync', 1, 12) == 'sync 1/2'  # no room: no bar
+    assert term_styling._bar(9, 2, '', 1, 80) == '━' * 30 + ' 9/2'  # a wrong total
+    assert term_styling._width(term_styling._bar(1, 2, 'sync', 1, 20)) == 19
+
+
 def test_skip_records_first_line(
     plain: None,
     monkeypatch: pytest.MonkeyPatch,

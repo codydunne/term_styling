@@ -9,6 +9,9 @@ symbols. Importing this module also switches such a stdout/stderr to
 errors='backslashreplace', since the caller's own text (a title with an em dash) would
 otherwise still crash the run one print() later; it prints as \u2014 instead.
 
+table() and progress() cover the two layouts scripts keep needing, and stop there: a
+piped table is plain records and a piped progress bar is nothing at all.
+
 SYMBOLS and COLORS hold the general states; a script with states of its own adds them
 with SYMBOLS.update()/COLORS.update(), so mark() and paint() know them too. A state needs
 a symbol to be marked but not a color: mark() leaves an uncolored one plain. Both are
@@ -24,16 +27,22 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import shutil
 import sys
-from typing import NoReturn, TextIO
+import time
+import unicodedata
+from collections.abc import Iterable, Iterator, Sequence
+from typing import NoReturn, TextIO, TypeVar
+
+_T = TypeVar('_T')
 
 # A literal, not importlib.metadata, so a vendored copy carries its own version;
 # tests/ checks it against pyproject.toml.
 __version__ = '0.2.1'
-# Every tier-1 character the base SYMBOLS and divider() print. A stream whose encoding
+# Every tier-1 character the base SYMBOLS, divider(), table(), and progress() print. A stream whose encoding
 # cannot hold them (a Latin-1 locale, PYTHONIOENCODING=ascii) gets tier 0.
-_PROBE = '✓✗⚠→—✎≡─'
+_PROBE = '✓✗⚠→—✎≡─━'
 
 
 def _encodes(stream: object) -> bool:
@@ -186,6 +195,132 @@ def divider(tier_: int | None = None) -> str:
     return paint(('─' if t else '-') * width, 'dim', t)
 
 
+# What paint() and link() wrap around text: zero columns wide on screen.
+_ESCAPE = re.compile(r'\033\[[0-9;]*m|\033\]8;;[^\033]*\033\\')
+
+
+def _width(text: str) -> int:
+    """Terminal columns `text` fills, so a painted or linked cell still lines up.
+
+    ponytail: stdlib only, so escapes and combining marks count 0 and East Asian wide
+    characters 2, but a multi-codepoint emoji is not measured as one glyph.
+    """
+    width = 0
+    for ch in _ESCAPE.sub('', text):
+        if unicodedata.category(ch) in ('Mn', 'Me', 'Cf'):
+            continue
+        width += 2 if unicodedata.east_asian_width(ch) in ('W', 'F') else 1
+    return width
+
+
+def table(
+    rows: Iterable[Sequence[object]],
+    headers: Sequence[object] | None = None,
+    align: str = '',
+    tier_: int | None = None,
+) -> str:
+    """`rows` as aligned columns, one line per row at every tier.
+
+    Tier 0 is the header line and the rows, padded with spaces: no borders and no rule,
+    so every line of a piped table is a record grep and awk can use. Tier 1 makes the
+    header bold and adds a dim rule under it. `align` is one `l` or `r` per column
+    (`'lr'`), left where it runs out. A None cell prints as the `none` symbol, so an
+    empty cell cannot shift the columns after it; a newline in a cell becomes a space.
+
+    ponytail: cells are never wrapped or truncated, because a wrapped row is no longer
+    one record. A table wider than the terminal wraps there; use rich for layout.
+    """
+    if set(align) - {'l', 'r'}:
+        # At every tier, like paint(): a typo fails in a piped test run too.
+        raise ValueError(f"align must be only 'l' and 'r', not {align!r}")
+    t = TIER if tier_ is None else tier_
+    none = SYMBOLS['none'][t]
+
+    def texts(cells: Sequence[object]) -> list[str]:
+        return [none if c is None else str(c).replace('\n', ' ') for c in cells]
+
+    head = texts(headers) if headers else []
+    body = [texts(row) for row in rows]
+    widths = [0] * max((len(r) for r in (head, *body)), default=0)
+    for row in (head, *body):
+        for i, cell in enumerate(row):
+            widths[i] = max(widths[i], _width(cell))
+
+    def line(cells: list[str], color: str | None = None) -> str:
+        out = []
+        for i, width in enumerate(widths):
+            cell = cells[i] if i < len(cells) else ''
+            pad = ' ' * (width - _width(cell))
+            # Padding stays outside the escapes, so a styled cell is not a styled gap.
+            if color and cell:
+                cell = paint(cell, color, t)
+            out.append(pad + cell if align[i : i + 1] == 'r' else cell + pad)
+        return '  '.join(out).rstrip()
+
+    lines = [line(head, 'head')] if head else []
+    if head and t:
+        lines.append(paint('  '.join('─' * w for w in widths), 'dim', t))
+    lines += [line(row) for row in body]
+    return '\n'.join(lines)
+
+
+def _bar(done: int, total: int | None, label: str, t: int, columns: int) -> str:
+    """One progress line: `label ━━━━━━ 3/10`, the bar dropped when it cannot fit."""
+    count = f'{done}/{total}' if total else str(done)
+    parts = [label] if label else []
+    if total:
+        # One column spare: a line that reaches the last column wraps on some terminals,
+        # and then \r no longer returns to its start.
+        size = min(30, columns - 2 - _width(' '.join([*parts, count])))
+        if size >= 5:
+            fill = min(size, size * done // total)
+            rest = paint('━' * (size - fill), 'dim', t) if fill < size else ''
+            parts.append('━' * fill + rest)
+    parts.append(count)
+    return ' '.join(parts)
+
+
+def progress(
+    items: Iterable[_T],
+    label: str = '',
+    total: int | None = None,
+    tier_: int | None = None,
+) -> Iterator[_T]:
+    """Yield `items`, redrawing one progress line on stderr; silent at tier 0.
+
+    On stderr and at ERR_TIER, so a piped stdout stays data and a log never collects
+    redraws. The line is erased when the loop ends, breaks, or raises: print the outcome
+    yourself with mark(). `total` defaults to len(items); without either, it counts.
+
+    ponytail: one bar, no ETA, and nothing guards the line, so text printed inside the
+    loop lands on it. Use rich for several bars or for logging under a live bar.
+    """
+    t = ERR_TIER if tier_ is None else tier_
+    if not t:
+        yield from items
+        return
+    if total is None:
+        try:
+            total = len(items)  # ty: ignore[invalid-argument-type]
+        except TypeError:
+            pass
+    done, drawn = 0, float('-inf')
+    try:
+        for item in items:
+            now = time.monotonic()
+            # Ten redraws a second at most: a tight loop should not spend its time here.
+            if now - drawn >= 0.1:
+                drawn = now
+                columns = shutil.get_terminal_size((80, 24)).columns or 80
+                sys.stderr.write(f'\r{_bar(done, total, label, t, columns)}\033[K')
+                sys.stderr.flush()
+            yield item
+            done += 1
+    finally:
+        sys.stderr.write('\r\033[K')
+        sys.stderr.flush()
+
+
 def skip(text: str, outcome: str = 'skipping') -> None:
     """A target this run could not reach: printed as an error, kept in SKIPPED.
 
@@ -274,6 +409,24 @@ def selftest() -> int:
     _same(change('due', 'a', 'b', '', 0), 'due: a -> b')
     _same(mark('ok', 'x', 2), '\033[32m\uf00c x\033[0m')  # glyph tier is opt-in
     _same(mark('file', 'x', 0), 'x')  # no tier 0 symbol, no stray space
+    # A piped table is records only; styling a cell must not move the columns.
+    rows = [('A1', 10), ('A22', None)]
+    _same(table(rows, ('id', 'pts'), 'lr', 0), 'id   pts\nA1    10\nA22    -')
+    _same(
+        table([(paint('A1', 'ok', 1), 'x'), ('A22', 'y')], tier_=1),
+        '\033[32mA1\033[0m   x\nA22  y',
+    )
+    _same(
+        table(rows, ('id', 'pts'), tier_=1).splitlines()[:2],
+        ['\033[1mid\033[0m   \033[1mpts\033[0m', '\033[2m───  ───\033[0m'],
+    )
+    _same(_width(link('http://x', '日本', 1)), 4)
+    _same(
+        _bar(1, 2, 'sync', 1, 80),
+        'sync ' + '━' * 15 + paint('━' * 15, 'dim', 1) + ' 1/2',
+    )
+    _same(_bar(3, None, '', 1, 80), '3')
+    _same(list(progress(iter('ab'), tier_=0)), ['a', 'b'])
     _same({'ok', 'fail', 'warn', 'info', 'new', 'dim', 'head'} - set(COLORS), set())
     # Every state, the caller's included: three string forms, and markable at each tier.
     for kind, forms in SYMBOLS.items():
@@ -327,8 +480,10 @@ __all__ = [
     'link',
     'mark',
     'paint',
+    'progress',
     'selftest',
     'skip',
+    'table',
     'tier',
     'warn',
 ]

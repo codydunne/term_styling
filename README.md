@@ -6,6 +6,7 @@ Script output that reads well everywhere it lands: terminals, pipes, and log fil
 - 🎨 **Unicode symbols and 16-color SGR** on a terminal
 - 🔗 **Clickable [OSC 8](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda) hyperlinks** where supported
 - ✨ **[Nerd Font](https://www.nerdfonts.com/) glyphs** when asked for
+- 📊 **Tables and a progress bar** that turn into plain records and silence when piped
 - 🔀 **Per-stream detection**: piped stdout and terminal stderr each style correctly
 - 🐍 **Standard library only**, Python 3.9+
 
@@ -58,7 +59,7 @@ It has no imports outside the standard library, and `uv run term_styling.py` run
 
 | tier | when | output |
 |---|---|---|
-| 0 | stream is not a TTY; `NO_COLOR` is non-empty; `CI` is non-empty and not `false`/`0` (any case); `TERM=dumb`; or the stream's encoding cannot print every one of `✓✗⚠→—✎≡─` (a Latin-1 locale, `PYTHONIOENCODING=ascii`) | ASCII, no escapes; links print as `label  url` |
+| 0 | stream is not a TTY; `NO_COLOR` is non-empty; `CI` is non-empty and not `false`/`0` (any case); `TERM=dumb`; or the stream's encoding cannot print every one of `✓✗⚠→—✎≡─━` (a Latin-1 locale, `PYTHONIOENCODING=ascii`) | ASCII, no escapes; links print as `label  url` |
 | 1 | a terminal | unicode symbols, color, OSC 8 links |
 | 2 | a terminal and `NERD_FONT=1` | as 1, with Font Awesome glyphs from a Nerd Font |
 
@@ -110,7 +111,7 @@ Over SSH or in WSL the font is the local terminal's; only the variable needs set
 
 A `sys.stdout` or `sys.stderr` whose encoding cannot print those symbols, and whose errors handler is still the default `strict`, is switched to `errors='backslashreplace'` on import.
 Tier 0 keeps this module's own output ASCII, but a caller's text (a title with an em dash) would otherwise still raise `UnicodeEncodeError` on the next `print()`; it prints as `\u2014` instead.
-`link`, `paint`, `mark`, `change`, and `divider` take an optional `tier_` and otherwise use `TIER`; `skip`, `error`, `warn`, and `die` write to stderr at `ERR_TIER`.
+`link`, `paint`, `mark`, `change`, `divider`, and `table` take an optional `tier_` and otherwise use `TIER`; `skip`, `error`, `warn`, `die`, and `progress` write to stderr at `ERR_TIER`.
 
 ## Usage
 
@@ -142,6 +143,61 @@ A state whose symbol is empty at a tier (`edit` and `file` at tier 0) marks as t
 term_styling.SYMBOLS.update({'held': ('held', '◐', '\uf04c')})
 term_styling.COLORS.update({'held': '33'})
 ```
+
+### Tables
+
+`table(rows, headers=None, align='')` returns the rows as aligned columns, one line per row at every tier.
+
+```python
+rows = [
+    ('A1', 10, mark('ok', 'in sync')),
+    ('A22', 5, mark('warn', 'points differ')),
+    ('A3', None, 'held'),
+]
+print(term_styling.table(rows, headers=('id', 'pts', 'state'), align='lr'))
+```
+
+Piped (tier 0), that is the header and the rows and nothing else, so every line is a record for `grep` and `awk`:
+
+```text
+id   pts  state
+A1    10  [OK] in sync
+A22    5  [!] points differ
+A3     -  held
+```
+
+On a terminal the header is bold with a dim rule under it.
+`align` takes one `l` or `r` per column and is left where it runs out; any other character raises `ValueError` at every tier.
+Cells may be styled with `mark()`, `paint()`, or `link()`: widths are measured without the escapes, with East Asian wide characters counted as two columns.
+A `None` cell prints as the `none` symbol (`-`, or `—` on a terminal), and a newline inside a cell becomes a space.
+Cells are never wrapped or truncated, because a wrapped row is no longer one record.
+
+### Progress
+
+`progress(items, label='', total=None)` yields the items and redraws one line on **stderr**:
+
+```python
+for path in term_styling.progress(paths, 'uploading'):
+    upload(path)
+print(mark('ok', f'{len(paths)} uploaded'))
+```
+
+```text
+uploading ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12/40
+```
+
+At tier 0 (stderr piped, `CI`, `NO_COLOR`) it prints nothing at all, so logs never collect redraws.
+The line is erased when the loop ends, breaks, or raises; print the outcome yourself.
+`total` defaults to `len(items)`; an iterator without a length shows a running count and no bar.
+Redraws are capped at ten a second.
+
+### When to use rich instead
+
+`table` and `progress` are deliberately the small cases.
+Reach for [rich](https://github.com/Textualize/rich) when you need wrapped or truncated cells, borders, several bars at once, an ETA, or log lines printed above a live bar (here, anything printed inside the loop lands on the bar's line).
+The two combine: build a rich `Console` only when `term_styling.TIER` is non-zero, and keep the plain path here.
+
+### Shared state
 
 Both dictionaries, `SKIPPED`, and the tiers are module globals shared by everything in the process.
 To pin a tier in a test, assign `term_styling.TIER = 0` (read it back as `term_styling.TIER`; a `from term_styling import TIER` binding does not follow the assignment).
@@ -215,6 +271,7 @@ uv run --isolated --no-project --with dist/*.whl python -m term_styling
 - Windows consoles that do not enable virtual-terminal processing (legacy `conhost.exe` without it turned on) print the escapes literally; Windows Terminal and VS Code's terminal are fine.
   `NO_COLOR=1` is the workaround.
   Not handled in code: turning VT processing on takes Win32 console calls, and nothing here tests them yet.
+- Column widths use the standard library's Unicode tables: wide and combining characters are measured, but a multi-codepoint emoji (a flag, a ZWJ sequence) is not measured as one glyph and can misalign a table row.
 - Colors are the 16-color SGR set only; there is no truecolor or 256-color path.
 - The encoding probe covers the base symbols. A caller's own symbols outside that set (`●`, say) are not checked, though in practice any encoding that prints all of the base set is a Unicode one.
 
