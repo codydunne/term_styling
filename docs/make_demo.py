@@ -43,6 +43,8 @@ PROMPT, COMMENT = (130, 170, 255), (120, 120, 135)
 TOKEN = re.compile(
     r'\x1b\[(\d+)m|\x1b\]8;;([^\x1b]*)\x1b\\|\x1b\[(\d*)([AJK])|\r?\n|\r|[^\x1b\r\n]'
 )
+# An escape sequence cut off by the end of a read: held back until the rest arrives.
+PARTIAL = re.compile(r'\x1b(?:\[\d*|\]8;;[^\x1b]*\x1b?)?$')
 # Output arriving within this many seconds is one frame: a burst of print() calls is not
 # worth a frame each, and a redraw is never split from its erase.
 BURST = 0.05
@@ -97,8 +99,9 @@ def capture(cmd: str, cwd: str) -> list:
         cmd, shell=True, cwd=cwd, env=env, stdout=slave, stderr=slave
     )
     os.close(slave)
-    # A character can straddle two reads, and so two bursts.
+    # A character or an escape sequence can straddle two reads, and so two bursts.
     decode = codecs.getincrementaldecoder('utf-8')().decode
+    held = ''
     bursts: list = []  # [first byte's time, last byte's time, text]
     while True:
         try:
@@ -108,12 +111,17 @@ def capture(cmd: str, cwd: str) -> list:
         if not chunk:
             break
         now = time.monotonic() - start
+        text = held + decode(chunk)
+        cut = PARTIAL.search(text)
+        held = text[cut.start() :] if cut else ''
+        text = text[: len(text) - len(held)]
         if bursts and now - bursts[-1][1] < BURST:
             bursts[-1][1] = now
-            bursts[-1][2] += decode(chunk)
+            bursts[-1][2] += text
         else:
-            bursts.append([now, now, decode(chunk)])
+            bursts.append([now, now, text])
     decode(b'', final=True)  # raises on output cut off mid-character
+    assert not held, f'{cmd}: output ended inside an escape sequence: {held!r}'
     proc.wait()
     os.close(master)
     return [(at, text) for at, _, text in bursts]
