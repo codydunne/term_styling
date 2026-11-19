@@ -303,6 +303,22 @@ uv run ruff check . && uv run ruff format --check .
 uv run ty check src tests
 ```
 
+### Running the Media workflow from the CLI
+
+The [Media workflow](.github/workflows/media.yml) normally runs on a release tag, but it can be started by hand with the [GitHub CLI](https://cli.github.com) to refresh the README's recordings without a release.
+A manual run records from the branch given by `--ref` (the default branch if omitted) and force-replaces the `media` branch, so the README on `main` shows the result as soon as it finishes; only run it from a ref whose demos you want published.
+
+```bash
+gh workflow run media.yml --ref main
+```
+
+```bash
+gh run watch "$(gh run list --workflow media.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
+```
+
+The workflow file has to exist on the ref you pass, and `gh` needs to be authenticated (`gh auth login`) with write access to the repository.
+To record locally instead, without touching the `media` branch, see [Demo recordings](#demo-recordings).
+
 ## Releasing to PyPI
 
 The package is published as `term-styling` and imported as `term_styling`.
