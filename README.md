@@ -14,7 +14,7 @@ Script output that reads well everywhere it lands: terminals, pipes, and log fil
 
 See the same script for [the other displayed tiers 0 and 1](#tiers).
 
-There are two more demos further down: [tables](#tables), the counterpart of `python -m rich.table`, and [progress lines](#progress), the counterpart of `python -m rich.progress`.
+There are two more demos further down: [tables](#tables), the counterpart of `uv run python -m rich.table`, and [progress lines](#progress), the counterpart of `uv run python -m rich.progress`.
 
 (Regenerate all five animations with `uv run docs/make_demo.py`; set `DEMO_FONT` and `DEMO_FONT_BOLD` to a Nerd Font for tier 2.)
 
@@ -80,13 +80,16 @@ In a terminal without a Nerd Font:
 
 ### Tier 2: Enabling Top-Tier Formatting
 
-See the demo at the top, and the [table demo](#tables) for the icons that have no tier 1 form.
+Install a [Nerd Font](https://www.nerdfonts.com/font-downloads), select it as your terminal's font, and set `NERD_FONT=1`:
+
+![docs/demo.py with NERD_FONT=1 at tier 2: a progress line under the results as they print, then Nerd Font glyphs, colors, dimmed old values, underlined links, and a summary table](docs/demo-tier2.webp)
+
+(Duplicate of the animation at the top.)
 
 Tier 2 changes two things.
 The outcome states (`ok`, `fail`, `warn`, ...) swap a Unicode symbol for a Font Awesome one, which is cosmetic.
 The thing states (`folder`, `branch`, `time`, `date`, `user`, `lock`, `cloud`, `tag`, `bug`) are where a Nerd Font earns its place: Unicode's only signs for them are double-width color emoji, so at tiers 0 and 1 `mark('folder', 'lectures/')` is the text alone, and at tier 2 it gains the icon.
-
-Install a [Nerd Font](https://www.nerdfonts.com/font-downloads), select it as your terminal's font, and set `NERD_FONT=1`.
+The [table demo](#tables) shows them at tier 1 and tier 2 side by side.
 
 **macOS:**
 
