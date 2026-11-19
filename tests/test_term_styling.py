@@ -3,13 +3,18 @@ from __future__ import annotations
 import importlib.metadata
 import io
 import os
+import re
 import shutil
 import subprocess
 import sys
+from datetime import date
+from pathlib import Path
 
 import pytest
 
 import term_styling
+
+REPO = Path(__file__).resolve().parent.parent
 
 
 class FakeTTY(io.StringIO):
@@ -268,3 +273,35 @@ def test_die(plain: None, capsys: pytest.CaptureFixture[str]) -> None:
 def test_version_matches_package_metadata():
     # __version__ is a literal for vendored copies; the bump to pyproject.toml must reach it too.
     assert term_styling.__version__ == importlib.metadata.version('term-styling')
+
+
+def _release_tuple(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r'\d+', version.split('+')[0])[:3])
+
+
+def test_changelog_leads_with_current_version():
+    # Newest entry first, so a bump without a changelog entry (or one added below an
+    # older entry) fails here instead of shipping.
+    changelog = (REPO / 'CHANGELOG.md').read_text(encoding='utf-8')
+    headings = re.findall(r'^## (\S+) — (\S+)$', changelog, flags=re.MULTILINE)
+    assert headings, 'CHANGELOG.md has no "## X.Y.Z — YYYY-MM-DD" entry'
+    version, released = headings[0]
+    assert version == term_styling.__version__
+    date.fromisoformat(released)
+    versions = [v for v, _ in headings]
+    assert len(versions) == len(set(versions)), 'duplicate CHANGELOG.md entries'
+
+
+def test_readme_names_current_version():
+    readme = (REPO / 'README.md').read_text(encoding='utf-8')
+    current = _release_tuple(term_styling.__version__)
+
+    tags = re.findall(r'@v(\d+\.\d+\.\d+)', readme)
+    assert tags, 'README.md no longer shows a release tag example'
+    assert set(tags) == {term_styling.__version__}
+
+    # The install snippets cap the range; a bump past the cap must move them.
+    caps = re.findall(r'term-styling>=([\d.]+),<([\d.]+)', readme)
+    assert caps, 'README.md no longer shows a capped install requirement'
+    for low, high in caps:
+        assert _release_tuple(low) <= current < _release_tuple(high), (low, high)
