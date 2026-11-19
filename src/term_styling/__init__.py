@@ -200,10 +200,11 @@ def divider(tier_: int | None = None) -> str:
 _NO_WIDTH = ('Mn', 'Me', 'Cf')
 # Escapes fill no columns: any CSI sequence, any OSC string, and the two- and
 # three-byte escapes (`tput sgr0` sends ESC ( B), so a cell another library styled
-# measures right too.
+# measures right too. A control character ends an OSC string early on a terminal,
+# so one inside is no part of the escape here either.
 _ESCAPE = re.compile(
     r'\033\[[0-?]*[ -/]*[@-~]'
-    r'|\033\][^\033\a]*(?:\033\\|\a)'
+    r'|\033\][^\x00-\x1f\x7f-\x9f]*(?:\033\\|\a)'
     r'|\033[()*+][0-9A-Za-z]'
     r'|\033[@-Z\\^_]'
 )
@@ -227,7 +228,7 @@ def _one_line(text: object) -> str:
 
 
 def _pictograph(code: int) -> bool:
-    """Whether a zero-width joiner or U+FE0F can make this codepoint part of an emoji:
+    """Whether a zero-width joiner can make this codepoint part of the emoji before it:
     the arrows-to-symbols blocks (♂, ❤, ⚠) and the emoji planes, but no letter."""
     return 0x2190 <= code <= 0x2BFF or 0x1F000 <= code <= 0x1FAFF
 
@@ -253,8 +254,9 @@ def _width(text: str) -> int:
             if last == 2 and i < len(chars) and _pictograph(ord(chars[i])):
                 i += 1
         elif code == 0xFE0F:
-            # A keycap's digit takes it too; a letter has no emoji form to select.
-            if last == 1 and (_pictograph(prev) or chr(prev) in '#*0123456789'):
+            # Any symbol may have an emoji form (the copyright sign does), and so does
+            # a keycap's digit; an ASCII letter has none to select.
+            if last == 1 and (prev > 0x7F or chr(prev) in '#*0123456789'):
                 width += 1
                 last = 2
         elif (

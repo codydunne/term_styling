@@ -351,6 +351,10 @@ def test_width_ignores_other_libraries_escapes(styled: str) -> None:
         ('\033[>4;1mab\033[2~', 2),  # private parameters, a non-letter final byte
         ('\033Mab', 2),  # a two-byte escape
         ('a\ufe0f', 1),  # a letter has no emoji form
+        ('\xa9\ufe0f', 2),  # ...but the copyright sign has
+        ('\u2122\ufe0f\u2139\ufe0f\u203c\ufe0f', 6),
+        # A control character ends an OSC string: what follows is on screen.
+        ('\033]0;t\x18shown\a', 12),
         ('\U0001f44d\u200dabc', 5),  # a joiner hides a pictograph, not a letter
         ('日\u200d本', 4),
         ('가\ud7cb', 2),  # an archaic Hangul final
@@ -363,8 +367,8 @@ def test_width_edge_cases(text: str, width: int) -> None:
 def test_table_cell_stays_on_one_line() -> None:
     out = term_styling.table([('a\r\nb', 'x'), ('c\td', 'y'), ('e\rf', 'z')], tier_=0)
     assert out == 'a b  x\nc d  y\ne f  z'
-    out = term_styling.table([('a\x85b\u2028c\x9bd', 'x')], tier_=0)
-    assert out.splitlines() == ['a b c d  x']
+    out = term_styling.table([('a\x85b\u2028c\x9bd\u2029e', 'x')], tier_=0)
+    assert out.splitlines() == ['a b c d e  x']
 
 
 def test_table_keeps_another_librarys_escapes_whole() -> None:
@@ -531,13 +535,18 @@ class HungUpTTY(FakeTTY):
 
 
 def test_progress_survives_a_terminal_that_hangs_up(
-    monkeypatch: pytest.MonkeyPatch,
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     screen = HungUpTTY()
     monkeypatch.setattr(sys, 'stderr', screen)
-    # The loop runs to the end, and its own exception is the one that surfaces.
-    assert list(term_styling.progress(range(3), tier_=1)) == [0, 1, 2]
-    assert screen.failed == 1  # and a terminal that failed is not tried again
+    # The loop runs to the end, with a redraw due after every item...
+    seen = []
+    for item in term_styling.progress(range(3), tier_=1):
+        seen.append(item)
+        clock.now += 1
+    assert seen == [0, 1, 2]
+    assert screen.failed == 1  # ...and a terminal that failed is not tried again
+    # Its own exception is the one that surfaces.
     with pytest.raises(ZeroDivisionError):
         for item in term_styling.progress(range(3), tier_=1):
             1 / item
@@ -572,8 +581,23 @@ def test_progress_through_a_wrapper_around_its_own_stand_in(
     assert not term_styling._LIVE.bars
 
 
+class Recorder(FakeTTY):
+    """A terminal that notes each write and flush, in order."""
+
+    def __init__(self, name: str, log: list) -> None:
+        super().__init__()
+        self.name, self.log = name, log
+
+    def write(self, text: str) -> int:
+        self.log.append((self.name, 'write', text))
+        return super().write(text)
+
+    def flush(self) -> None:
+        self.log.append((self.name, 'flush', ''))
+
+
 def test_stand_in_is_the_stream_for_everything_but_writing(
-    monkeypatch: pytest.MonkeyPatch,
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     screen = Utf8TTY()
     monkeypatch.setattr(sys, 'stderr', screen)
@@ -583,13 +607,16 @@ def test_stand_in_is_the_stream_for_everything_but_writing(
         assert sys.stderr.encoding == 'utf-8'
         assert term_styling.tier(sys.stderr) == term_styling.tier(screen)
         sys.stderr.writelines(['a\n', 'b\n'])
-    assert 'a\nb\n' in screen.getvalue()
+    bar0 = '\r' + DIM.format('━' * 30) + ' 0/1\033[K'
+    # writelines goes above the bar like any other write.
+    assert screen.getvalue() == bar0 + ERASE + 'a\nb\n' + bar0 + ERASE
 
 
 def test_terminal_stdout_and_stderr_are_both_wrapped(
     clock: Clock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    out, err = FakeTTY(), FakeTTY()
+    log: list = []
+    out, err = Recorder('out', log), Recorder('err', log)
     monkeypatch.setattr(sys, 'stdout', out)
     monkeypatch.setattr(sys, 'stderr', err)
     for _ in term_styling.progress(range(1), tier_=1):
@@ -599,6 +626,11 @@ def test_terminal_stdout_and_stderr_are_both_wrapped(
     bar0 = '\r' + DIM.format('━' * 30) + ' 0/1\033[K'
     # The bar goes before stdout prints and comes back after its line ends.
     assert err.getvalue() == bar0 + ERASE + bar0 + ERASE
+    # One screen behind two buffers: stdout's line has to be flushed before the bar is
+    # drawn again on stderr, or the two would land out of order.
+    newline = log.index(('out', 'write', '\n'))
+    redraw = log.index(('err', 'write', bar0), newline)
+    assert ('out', 'flush', '') in log[newline:redraw]
 
 
 def test_progress_without_a_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -665,6 +697,10 @@ def test_bar_without_total_or_room() -> None:
     assert term_styling._bar(0, 0, '', 1, 80) == '0 0:00'
     # No room: no bar.
     assert term_styling._bar(1, 2, 'sync', 1, 12, 4) == 'sync 1/2'
+    # An estimate that would exactly fill the line wraps: the bar takes its place.
+    assert term_styling._bar(1, 2, 'sync', 1, 17, 4) == (
+        'sync ' + '━' * 3 + DIM.format('━' * 4) + ' 1/2'
+    )
     assert term_styling._bar(1, 2, 'sync', 1, 18, 4) == 'sync 1/2 eta 0:04'
     # A wrong total neither overflows the bar nor estimates.
     assert term_styling._bar(9, 2, '', 1, 80) == '━' * 30 + ' 9/2'
