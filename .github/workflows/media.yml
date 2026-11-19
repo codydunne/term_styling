@@ -1,0 +1,49 @@
+name: Media
+
+# The demo recordings the README shows live on the `media` branch, not on main: nine
+# animations a release would otherwise add to the history again every time. A pushed
+# vX.Y.Z tag records them from that tag's demo scripts and replaces the branch with one
+# commit, so it only ever holds the latest set. A manual run does the same from the
+# branch it is started on.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+      # Pinned by version and checksum: the tier 2 progress bar needs Nerd Fonts 3.3 or
+      # newer, and a recording should not change because a font release did.
+      - name: Fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-dejavu-core
+          curl -fsSL -o "$RUNNER_TEMP/font.tar.xz" \
+            https://github.com/ryanoasis/nerd-fonts/releases/download/v3.4.0/JetBrainsMono.tar.xz
+          echo "ef552a3e638f25125c6ad4c51176a6adcdce295ab1d2ffacf0db060caf8c1582  $RUNNER_TEMP/font.tar.xz" | sha256sum -c
+          mkdir "$RUNNER_TEMP/font"
+          tar -xf "$RUNNER_TEMP/font.tar.xz" -C "$RUNNER_TEMP/font"
+      - name: Record
+        run: uv run docs/make_demo.py --out "$RUNNER_TEMP/media"
+        env:
+          DEMO_FONT: ${{ runner.temp }}/font/JetBrainsMonoNerdFontMono-Regular.ttf
+          DEMO_FONT_BOLD: ${{ runner.temp }}/font/JetBrainsMonoNerdFontMono-Bold.ttf
+      # A fresh repository with one commit, force-pushed: the branch has no history to
+      # keep, and that is the point of it.
+      - name: Replace the media branch
+        working-directory: ${{ runner.temp }}/media
+        run: |
+          git init --quiet --initial-branch media
+          git add .
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit --quiet --message "Demo recordings from ${GITHUB_REF_NAME} (${GITHUB_SHA})"
+          git push --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" media
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

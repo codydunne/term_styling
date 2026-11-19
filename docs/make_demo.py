@@ -2,22 +2,32 @@
 # requires-python = ">=3.9"
 # dependencies = ["pillow", "fonttools"]
 # ///
-"""Regenerate the animations in docs/: `uv run docs/make_demo.py` (Linux/macOS, needs a pty).
+"""Record the demo animations: `uv run docs/make_demo.py` (Linux/macOS, needs a pty).
 
-Writes one animation per tier for each script: demo-tier{0,1,2}.webp from demo.py,
+    uv run docs/make_demo.py                      # all nine, into docs/
+    uv run docs/make_demo.py demo-table-tier2     # only the ones named
+    uv run docs/make_demo.py --out /tmp/media     # somewhere else
+
+One animation per tier for each script: demo-tier{0,1,2}.webp from demo.py,
 demo-table-tier{0,1,2}.webp from demo_table.py, and demo-progress-tier{0,1,2}.webp from
-demo_progress.py.
+demo_progress.py. They are not kept on main: .github/workflows/media.yml runs this on a
+release tag and replaces the `media` branch, which the README links to.
 
-Runs each script under a real pseudo-terminal once per command and replays the captured output
-with its timing, so the progress line animates. Only what term_styling emits is parsed: SGR
-codes, OSC 8 links, and the carriage return, cursor-up, and erase codes of progress(). The NERD_FONT scene needs
-a Nerd Font: JetBrainsMono Nerd Font Mono is found via fc-list or, under WSL, in the
-Windows font folders (where pwsh's Install-NerdFont puts it), or set DEMO_FONT and
-DEMO_FONT_BOLD to another's files. It has to be Nerd Fonts 3.3 or newer (3.1 for Fira
-Code), which is where the tier 2 progress bar's glyphs arrived. Characters that font lacks
-are drawn from DejaVu Sans Mono; a character neither has is an error.
+Runs each script under a real pseudo-terminal once per command and replays the captured
+output with its timing, so the progress line animates. Only what term_styling emits is
+parsed: SGR codes, OSC 8 links, and the carriage return, cursor-up, and erase codes of
+progress(). Measured gaps are rounded to STEP ms, so a run that prints the same thing
+again writes the same bytes; the progress recordings can still differ, since their
+estimates come from the real clock.
+
+The NERD_FONT scenes need a Nerd Font: JetBrainsMono Nerd Font Mono is found via fc-list
+or, under WSL, in the Windows font folders (where pwsh's Install-NerdFont puts it), or
+set DEMO_FONT and DEMO_FONT_BOLD to another's files. It has to be Nerd Fonts 3.3 or newer
+(3.1 for Fira Code), which is where the tier 2 progress bar's glyphs arrived. Characters
+that font lacks are drawn from DejaVu Sans Mono; a character neither has is an error.
 """
 
+import argparse
 import codecs
 import os
 import pty
@@ -53,6 +63,9 @@ PARTIAL = re.compile(r'\x1b(?:\[\d*|\]8;;[^\x1b]*\x1b?)?$')
 # Output arriving within this many seconds is one frame: a burst of print() calls is not
 # worth a frame each, and a redraw is never split from its erase.
 BURST = 0.05
+# Measured gaps are shown rounded to this many ms: wall-clock jitter would otherwise
+# change every file on every run.
+STEP = 50
 # One animation per file, written to <name>.webp. Each scene starts on a cleared screen:
 # (typed command, comment shown after it) pairs. The log file keeps the redirect scene
 # deterministic: `| cat` would race cat against stderr. The table demo writes to stdout
@@ -202,6 +215,21 @@ class Screen:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description='Record the demo animations.')
+    parser.add_argument(
+        'names',
+        nargs='*',
+        metavar='name',
+        help=f'animations to record (default: all): {", ".join(ANIMATIONS)}',
+    )
+    parser.add_argument(
+        '--out', type=Path, default=HERE, help='directory to write to (default: docs/)'
+    )
+    args = parser.parse_args()
+    unknown = sorted(set(args.names) - set(ANIMATIONS))
+    if unknown:
+        parser.error(f'no such animation: {", ".join(unknown)}')
+    chosen = {n: s for n, s in ANIMATIONS.items() if not args.names or n in args.names}
     font = os.environ.get('DEMO_FONT') or find_font('Regular')
     bold = os.environ.get('DEMO_FONT_BOLD') or find_font('Bold') or font
     if not font:
@@ -243,13 +271,12 @@ def main() -> int:
         for script in HERE.glob('demo*.py'):
             shutil.copy(script, cwd)
         # Render every tier before saving any, so a missing glyph leaves no file half-updated.
-        renders = {
-            name: render(scenes, draw, cwd) for name, scenes in ANIMATIONS.items()
-        }
+        renders = {name: render(scenes, draw, cwd) for name, scenes in chosen.items()}
+    args.out.mkdir(parents=True, exist_ok=True)
     for name, (frames, durations, rows) in renders.items():
         # Each animation is as tall as its own longest screen, not the tallest of all.
         box = (0, 0, size[0], rows * ch + 2 * PAD)
-        save(HERE / f'{name}.webp', [f.crop(box) for f in frames], durations)
+        save(args.out / f'{name}.webp', [f.crop(box) for f in frames], durations)
     return 0
 
 
@@ -281,7 +308,8 @@ def render(scenes: list, draw, cwd: str) -> tuple:
                 frames.append(draw(screen.lines))
                 # Each burst stays up until the next one arrived; the last, to be read.
                 if i + 1 < len(bursts):
-                    durations.append(max(20, round((bursts[i + 1][0] - at) * 1000)))
+                    gap = (bursts[i + 1][0] - at) * 1000
+                    durations.append(max(STEP, round(gap / STEP) * STEP))
                 else:
                     durations.append(4500 if cmd == scene[-1][0] else 1500)
     return frames, durations, tallest

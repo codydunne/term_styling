@@ -10,20 +10,20 @@ Script output that reads well everywhere it lands: terminals, pipes, and log fil
 - 🔀 **Per-stream detection**: piped stdout and terminal stderr each style correctly
 - 🐍 **Standard library only**, Python 3.9+
 
-![docs/demo.py with NERD_FONT=1 at tier 2: a progress line under the results as they print, then Nerd Font glyphs, colors, dimmed old values, underlined links, and a summary table](docs/demo-tier2.webp)
+![docs/demo.py with NERD_FONT=1 at tier 2: a progress line under the results as they print, then Nerd Font glyphs, colors, dimmed old values, underlined links, and a summary table](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-tier2.webp)
 
 See the same script for [the other displayed tiers 0 and 1](#tiers).
 
 There are two more demos further down: [tables](#tables), the counterpart of `uv run python -m rich.table`, and [progress lines](#progress), the counterpart of `uv run python -m rich.progress`.
 
-(Regenerate all nine animations, one per tier for each of the three demo scripts, with `uv run docs/make_demo.py`; set `DEMO_FONT` and `DEMO_FONT_BOLD` to a Nerd Font for tier 2.)
+(The recordings are kept on the [`media` branch](https://github.com/codydunne/term_styling/tree/media), not on `main`, and are rebuilt from the demo scripts by the [Media workflow](https://github.com/codydunne/term_styling/blob/main/.github/workflows/media.yml) on each release tag. To record them yourself: `uv run docs/make_demo.py`, or `uv run docs/make_demo.py demo-table-tier2` for one; set `DEMO_FONT` and `DEMO_FONT_BOLD` to a Nerd Font, 3.3 or newer, for tier 2.)
 
 ## Install
 
 ### From PyPI (recommended)
 
 The package is `term-styling` on PyPI and imports as `term_styling`.
-Minor versions can break compatibility before 1.0 (see [CHANGELOG.md](CHANGELOG.md)), so cap the minor version:
+Minor versions can break compatibility before 1.0 (see [CHANGELOG.md](https://github.com/codydunne/term_styling/blob/main/CHANGELOG.md)), so cap the minor version:
 
 ```bash
 uv add 'term-styling>=0.3,<0.4'      # in a uv project
@@ -69,20 +69,20 @@ It has no imports outside the standard library, and `uv run term_styling.py` run
 
 With `NO_COLOR=1` and then with stdout redirected to a log while stderr stays on the terminal:
 
-![docs/demo.py at tier 0: with NO_COLOR=1 both streams are plain ASCII; redirected to sync.log, the progress line and stderr stay styled and the log holds ASCII, the table as plain rows](docs/demo-tier0.webp)
+![docs/demo.py at tier 0: with NO_COLOR=1 both streams are plain ASCII; redirected to sync.log, the progress line and stderr stay styled and the log holds ASCII, the table as plain rows](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-tier0.webp)
 
 
 ### Tier 1 
 
 In a terminal without a Nerd Font:
 
-![docs/demo.py in a terminal at tier 1: unicode symbols in place of the Nerd Font glyphs, with the same progress line and table](docs/demo-tier1.webp)
+![docs/demo.py in a terminal at tier 1: unicode symbols in place of the Nerd Font glyphs, with the same progress line and table](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-tier1.webp)
 
 ### Tier 2: Enabling Top-Tier Formatting
 
 Install a [Nerd Font](https://www.nerdfonts.com/font-downloads), select it as your terminal's font, and set `NERD_FONT=1`:
 
-![docs/demo.py with NERD_FONT=1 at tier 2: a progress line under the results as they print, then Nerd Font glyphs, colors, dimmed old values, underlined links, and a summary table](docs/demo-tier2.webp)
+![docs/demo.py with NERD_FONT=1 at tier 2: a progress line under the results as they print, then Nerd Font glyphs, colors, dimmed old values, underlined links, and a summary table](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-tier2.webp)
 
 (Duplicate of the animation at the top.)
 
@@ -170,15 +170,15 @@ term_styling.COLORS.update({'archived': '2'})
 
 With a Nerd Font (tier 2), every cell gains an icon and the columns still line up:
 
-![docs/demo_table.py with NERD_FONT=1: a document listing as a table with a bold header and dim rule, an icon in each cell (folder, file, lock, bug, person, clock, eye for published, crossed eye for unpublished, pause for held), and a branch, cloud, and tag icon in the title line](docs/demo-table-tier2.webp)
+![docs/demo_table.py with NERD_FONT=1: a document listing as a table with a bold header and dim rule, an icon in each cell (folder, file, lock, bug, person, clock, eye for published, crossed eye for unpublished, pause for held), and a branch, cloud, and tag icon in the title line](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-table-tier2.webp)
 
 On a terminal without one (tier 1), folders, owners, and times are the text alone and the states are colored dots:
 
-![docs/demo_table.py on a terminal at tier 1: the same table with no icons for folders, people, or times, and green, hollow, and half-filled dots for published, unpublished, and held](docs/demo-table-tier1.webp)
+![docs/demo_table.py on a terminal at tier 1: the same table with no icons for folders, people, or times, and green, hollow, and half-filled dots for published, unpublished, and held](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-table-tier1.webp)
 
 Piped (tier 0), the same call prints plain records:
 
-![docs/demo_table.py at tier 0: piped through cat the table is space-padded ASCII rows with bracketed states, and piped through grep for the unpublished state it is the one matching row](docs/demo-table-tier0.webp)
+![docs/demo_table.py at tier 0: piped through cat the table is space-padded ASCII rows with bracketed states, and piped through grep for the unpublished state it is the one matching row](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-table-tier0.webp)
 
 ```python
 rows = [
@@ -209,15 +209,15 @@ Cells are never wrapped or truncated, because a wrapped row is no longer one rec
 
 `progress(items, label='', total=None)` yields the items and redraws one line on **stderr**:
 
-![docs/demo_progress.py with NERD_FONT=1 at tier 2: two nested progress lines drawn as framed bars with end caps that fill from the left, with counts and time estimates, while results and a warning print above them with Nerd Font glyphs; then a counting line for a stream of unknown length, all erased at the end](docs/demo-progress-tier2.webp)
+![docs/demo_progress.py with NERD_FONT=1 at tier 2: two nested progress lines drawn as framed bars with end caps that fill from the left, with counts and time estimates, while results and a warning print above them with Nerd Font glyphs; then a counting line for a stream of unknown length, all erased at the end](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-progress-tier2.webp)
 
 At tier 1 the bar is a heavy rule, dimmed where it is still to do:
 
-![docs/demo_progress.py on a terminal at tier 1: the same nested progress lines and counting line, with Unicode check marks and warning signs on the results above them](docs/demo-progress-tier1.webp)
+![docs/demo_progress.py on a terminal at tier 1: the same nested progress lines and counting line, with Unicode check marks and warning signs on the results above them](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-progress-tier1.webp)
 
 At tier 0 no line is drawn at all:
 
-![docs/demo_progress.py with NO_COLOR=1 at tier 0: only the results print, as plain ASCII lines, with no progress lines](docs/demo-progress-tier0.webp)
+![docs/demo_progress.py with NO_COLOR=1 at tier 0: only the results print, as plain ASCII lines, with no progress lines](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-progress-tier0.webp)
 
 ```python
 for path in term_styling.progress(paths, 'uploading'):
@@ -341,6 +341,7 @@ One-time setup, then the same steps as every later release:
    ```
 
 4. Tag the green commit and push the tag. The workflow checks that the tag matches `pyproject.toml`, builds, runs the selftest on the wheel, and publishes:
+   The **Media** workflow runs on the same tag: it records the demo animations from that commit and replaces the `media` branch the README's images point to.
 
    ```bash
    git tag -a "v$(uv version --short)" -m "term-styling $(uv version --short)" && git push origin "v$(uv version --short)"
@@ -368,4 +369,4 @@ uv run --isolated --no-project --with dist/*.whl python -m term_styling
 
 ## License
 
-Apache-2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Apache-2.0; see [LICENSE](https://github.com/codydunne/term_styling/blob/main/LICENSE) and [NOTICE](https://github.com/codydunne/term_styling/blob/main/NOTICE).
