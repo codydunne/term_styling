@@ -163,7 +163,7 @@ term_styling.die('cannot continue', code=2)  # red on stderr, then exit
 
 `SYMBOLS` maps a state to its `(plain, unicode, glyph)` forms and `COLORS` to its SGR code.
 A script with states of its own extends both, and `mark()`/`paint()` pick them up.
-A state needs a symbol to be marked but not a color (`arrow`, `none`, `edit`, `file`, and the thing states have none), and `mark()` leaves an uncolored state plain.
+A state needs a symbol to be marked but not a color (`arrow`, `none`, `edit`, `file`, `download`, `upload`, and the thing states have none), and `mark()` leaves an uncolored state plain.
 A state whose symbol is empty at a tier (`edit` and `file` at tier 0, the thing states below tier 2) marks as the text alone.
 
 | states | tier 0 | tier 1 | tier 2 |
