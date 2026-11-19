@@ -245,14 +245,16 @@ def main() -> int:
         renders = {
             name: render(scenes, draw, cwd) for name, scenes in ANIMATIONS.items()
         }
-    for name, (frames, durations) in renders.items():
-        save(HERE / f'{name}.webp', frames, durations)
+    for name, (frames, durations, rows) in renders.items():
+        # Each animation is as tall as its own longest screen, not the tallest of all.
+        box = (0, 0, size[0], rows * ch + 2 * PAD)
+        save(HERE / f'{name}.webp', [f.crop(box) for f in frames], durations)
     return 0
 
 
 def render(scenes: list, draw, cwd: str) -> tuple:
-    """Frames and their durations in ms: each command typed out, then its output."""
-    frames, durations = [], []
+    """Frames, their durations in ms, and the rows used: each command typed, then run."""
+    frames, durations, tallest = [], [], 1
     for scene in scenes:
         screen = Screen()
         for cmd, comment in scene:
@@ -271,6 +273,7 @@ def render(scenes: list, draw, cwd: str) -> tuple:
                 screen.feed(text)
                 rows = len(screen.lines) - (not screen.lines[-1])
                 assert rows <= ROWS, f'{cmd}: {rows} lines > {ROWS} rows'
+                tallest = max(tallest, rows)
                 assert all(len(r) <= COLS for r in screen.lines), (
                     f'{cmd}: a line > {COLS} cols'
                 )
@@ -280,7 +283,7 @@ def render(scenes: list, draw, cwd: str) -> tuple:
                     durations.append(max(20, round((bursts[i + 1][0] - at) * 1000)))
                 else:
                     durations.append(4500 if cmd == scene[-1][0] else 1500)
-    return frames, durations
+    return frames, durations, tallest
 
 
 def save(out_path: Path, frames: list, durations: list) -> None:
