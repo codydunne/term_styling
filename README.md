@@ -14,7 +14,9 @@ Script output that reads well everywhere it lands: terminals, pipes, and log fil
 
 See the same script for [the other displayed tiers 0 and 1](#tiers).
 
-(The recordings are kept on the [`media` branch](https://github.com/codydunne/term_styling/tree/media), not on `main`, and are rebuilt from the demo scripts by the [Media workflow](https://github.com/codydunne/term_styling/blob/main/.github/workflows/media.yml) on each release tag. To record them yourself: `uv run docs/make_demo.py`, or `uv run docs/make_demo.py demo-tier2` for one; set `DEMO_FONT` and `DEMO_FONT_BOLD` to a Nerd Font, 3.3 or newer, for tier 2.)
+The progress bar takes any glyphs you give it, one or two columns wide:
+
+![docs/demo_geese.py: one command runs a progress line labeled migrating whose bar is a row of goose emoji filling from the left over dots, with a count and a time estimate, then is replaced by a green check and 15 geese landed](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-geese.webp)
 
 ## Install
 
@@ -83,10 +85,6 @@ Install a [Nerd Font](https://www.nerdfonts.com/font-downloads), select it as yo
 ![docs/demo.py with NERD_FONT=1 at tier 2: a course-site sync with branch, cloud, and tag icons in the title, two nested progress bars drawn as framed bars while results and a warning print above them, dimmed old values, underlined links, and a table with an icon in nearly every cell](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-tier2.webp)
 
 (Duplicate of the animation at the top.)
-
-The progress bar takes any glyphs you give it, one or two columns wide ([`docs/demo_geese.py`](https://github.com/codydunne/term_styling/blob/main/docs/demo_geese.py)):
-
-![docs/demo_geese.py: one command runs a progress line labeled migrating whose bar is a row of goose emoji filling from the left over dots, with a count and a time estimate, then is replaced by a green check and 15 geese landed](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-geese.webp)
 
 Tier 2 changes two things.
 The outcome states (`ok`, `fail`, `warn`, ...) swap a Unicode symbol for a Font Awesome one, which is cosmetic.
@@ -352,6 +350,10 @@ To build and selftest locally without publishing:
 uv build --clear
 uv run --isolated --no-project --with dist/*.whl python -m term_styling
 ```
+
+### Demo recordings
+
+The recordings are kept on the [`media` branch](https://github.com/codydunne/term_styling/tree/media), not on `main`, and are rebuilt from the demo scripts by the [Media workflow](https://github.com/codydunne/term_styling/blob/main/.github/workflows/media.yml) on each release tag. To record them yourself: `uv run docs/make_demo.py`, or `uv run docs/make_demo.py demo-tier2` for one; set `DEMO_FONT` and `DEMO_FONT_BOLD` to a Nerd Font, 3.3 or newer, for tier 2.
 
 ## Known limitations
 
