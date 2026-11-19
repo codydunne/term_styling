@@ -84,6 +84,10 @@ Install a [Nerd Font](https://www.nerdfonts.com/font-downloads), select it as yo
 
 (Duplicate of the animation at the top.)
 
+The progress bar takes any glyphs you give it, one or two columns wide ([`docs/demo_geese.py`](https://github.com/codydunne/term_styling/blob/main/docs/demo_geese.py)):
+
+![docs/demo_geese.py: one command runs a progress line labeled migrating whose bar is a row of goose emoji filling from the left over dots, with a count and a time estimate, then is replaced by a green check and 15 geese landed](https://raw.githubusercontent.com/codydunne/term_styling/media/demo-geese.webp)
+
 Tier 2 changes two things.
 The outcome states (`ok`, `fail`, `warn`, ...) swap a Unicode symbol for a Font Awesome one, which is cosmetic.
 The thing states (`folder`, `branch`, `time`, `date`, `user`, `lock`, `cloud`, `tag`, `bug`) are where a Nerd Font earns its place: Unicode's only signs for them are double-width color emoji, so at tiers 0 and 1 `mark('folder', 'lectures/')` is the text alone, and at tier 2 it gains the icon.

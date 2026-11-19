@@ -4,12 +4,12 @@
 # ///
 """Record the demo animations: `uv run docs/make_demo.py` (Linux/macOS, needs a pty).
 
-    uv run docs/make_demo.py                      # all three, into docs/
+    uv run docs/make_demo.py                      # all four, into docs/
     uv run docs/make_demo.py demo-tier2           # only the ones named
     uv run docs/make_demo.py --out /tmp/media     # somewhere else
 
-One animation per tier, demo-tier{0,1,2}.webp, all from demo.py. They are not kept on
-main: .github/workflows/media.yml runs this on a
+One animation per tier, demo-tier{0,1,2}.webp, from demo.py, and demo-geese.webp from
+demo_geese.py. They are not kept on main: .github/workflows/media.yml runs this on a
 release tag and replaces the `media` branch, which the README links to.
 
 Runs each script under a real pseudo-terminal once per command and replays the captured
@@ -23,7 +23,8 @@ The NERD_FONT scenes need a Nerd Font: JetBrainsMono Nerd Font Mono is found via
 or, under WSL, in the Windows font folders (where pwsh's Install-NerdFont puts it), or
 set DEMO_FONT and DEMO_FONT_BOLD to another's files. It has to be Nerd Fonts 3.3 or newer
 (3.1 for Fira Code), which is where the tier 2 progress bar's glyphs arrived. Characters
-that font lacks are drawn from DejaVu Sans Mono; a character neither has is an error.
+that font lacks are drawn from DejaVu Sans Mono, and emoji from Noto Color Emoji (found
+via fc-list, or set DEMO_FONT_EMOJI); a character none of them has is an error.
 """
 
 import argparse
@@ -36,6 +37,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 from pathlib import Path
 
 from fontTools.ttLib import TTFont
@@ -45,6 +47,7 @@ HERE = Path(__file__).parent
 COLS, ROWS, FONT_SIZE, PAD = 72, 30, 30, 30
 DEJAVU = '/usr/share/fonts/truetype/dejavu/DejaVuSansMono'
 FAMILY = 'JetBrainsMono Nerd Font Mono'
+EMOJI = 'Noto Color Emoji'
 BG, FG = (30, 30, 36), (220, 220, 220)
 SGR = {
     '31': (240, 98, 98),
@@ -80,14 +83,17 @@ ANIMATIONS = {
     'demo-tier2': [
         [('NERD_FONT=1 uv run python demo.py', '# tier 2: Nerd Font glyphs')]
     ],
+    'demo-geese': [
+        [('NERD_FONT=1 uv run python demo_geese.py', '# any glyph can be the bar')]
+    ],
 }
 
 
-def find_font(style: str) -> str:
-    """FAMILY's file in `style` from fontconfig, else from WSL's Windows font folders, else ''."""
+def find_font(style: str, family: str = FAMILY) -> str:
+    """`family`'s file in `style` from fontconfig, else WSL's Windows font folders, else ''."""
     try:
         out = subprocess.run(
-            ['fc-list', '-f', '%{file}\n', f'{FAMILY}:style={style}'],
+            ['fc-list', '-f', '%{file}\n', f'{family}:style={style}'],
             capture_output=True,
             text=True,
         ).stdout
@@ -97,7 +103,7 @@ def find_font(style: str) -> str:
         *Path('/mnt/c/Users').glob('*/AppData/Local/Microsoft/Windows/Fonts'),
         Path('/mnt/c/Windows/Fonts'),
     ]
-    name = f'{FAMILY.replace(" ", "")}-{style}'
+    name = f'{family.replace(" ", "")}-{style}'
     found = [f for d in windows for f in sorted(d.glob(f'{name}.[ot]tf'))]
     return next(iter([*out.splitlines(), *map(str, found)]), '')
 
@@ -184,8 +190,10 @@ class Screen:
                     self.lines.append([])
             else:
                 cell = (tok, style['color'], style['dim'], style['bold'], style['link'])
-                line[self.col : self.col + 1] = [cell]
-                self.col += 1
+                # A wide character (an emoji) fills two columns: its cell and a None.
+                wide = unicodedata.east_asian_width(tok) in ('W', 'F')
+                line[self.col : self.col + 1 + wide] = [cell, None][: 1 + wide]
+                self.col += 1 + wide
 
     def type(self, line: list) -> None:
         """A whole line at the cursor, as if entered at a prompt."""
@@ -225,20 +233,47 @@ def main() -> int:
     }
     covered = set(TTFont(font).getBestCmap())
     drawable = covered | set(TTFont(f'{DEJAVU}.ttf').getBestCmap())
+    # Emoji come from a color font, found only if a demo prints one. Noto Color Emoji
+    # holds bitmaps at one size, so each glyph is drawn there and scaled to two columns.
+    emoji_file = os.environ.get('DEMO_FONT_EMOJI') or find_font('Regular', EMOJI)
+    emoji_face = ImageFont.truetype(emoji_file, 109) if emoji_file else None
+    emoji_has = set(TTFont(emoji_file).getBestCmap()) if emoji_file else set()
+    tiles: dict = {}
     cw = fonts[False].getlength('M')
     ch = round(FONT_SIZE * 1.35)
     size = (round(COLS * cw) + 2 * PAD, ROWS * ch + 2 * PAD)
+
+    def tile(c: str) -> Image.Image:
+        """The emoji `c` as an image two columns wide."""
+        if c not in tiles:
+            box = emoji_face.getbbox(c)
+            glyph = Image.new('RGBA', (box[2], box[3]), (0, 0, 0, 0))
+            ImageDraw.Draw(glyph).text((0, 0), c, font=emoji_face, embedded_color=True)
+            scale = min(2 * cw / glyph.width, ch / glyph.height)
+            tiles[c] = glyph.resize(
+                (round(glyph.width * scale), round(glyph.height * scale)), Image.LANCZOS
+            )
+        return tiles[c]
 
     def draw(lines: list) -> Image.Image:
         img = Image.new('RGB', size, BG)
         d = ImageDraw.Draw(img)
         for y, row in enumerate(lines):
-            for x, (c, color, dim, bold, ul) in enumerate(row):
+            for x, cell in enumerate(row):
+                if cell is None:  # the second column of a wide character
+                    continue
+                c, color, dim, bold, ul = cell
                 if dim:
                     color = tuple((a + b) // 2 for a, b in zip(color, BG))
                 px, py = PAD + round(x * cw), PAD + y * ch
+                if ord(c) not in drawable and ord(c) in emoji_has:
+                    img.paste(tile(c), (px, py + (ch - tile(c).height) // 2), tile(c))
+                    continue
                 if ord(c) not in drawable:
-                    sys.exit(f'{font} and DejaVu Sans Mono both lack U+{ord(c):04X}')
+                    sys.exit(
+                        f'{font}, DejaVu Sans Mono, and {emoji_file or "no emoji font"}'
+                        f' all lack U+{ord(c):04X}'
+                    )
                 face = (fonts if ord(c) in covered else fallback)[bold]
                 d.text((px, py), c, font=face, fill=color)
                 if ul:
