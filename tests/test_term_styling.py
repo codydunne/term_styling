@@ -326,9 +326,9 @@ def test_width_counts_one_glyph_as_two_columns(glyph: str) -> None:
 
 def test_width_of_plain_and_narrow_text() -> None:
     assert term_styling._width('⚠ áb') == 4
-    assert term_styling._width('‍') == 0  # a joiner with nothing to join
-    assert term_styling._width('a‍b') == 2  # between letters it hides nothing
-    assert term_styling._width('각') == 2  # one Hangul syllable block
+    assert term_styling._width('\u200d') == 0  # a joiner with nothing to join
+    assert term_styling._width('a\u200db') == 2  # between letters it hides nothing
+    assert term_styling._width('ᄀ\u1161\u11a8') == 2  # one Hangul syllable block
 
 
 @pytest.mark.parametrize(
@@ -344,9 +344,40 @@ def test_width_ignores_other_libraries_escapes(styled: str) -> None:
     assert term_styling._width(styled) == 2
 
 
+@pytest.mark.parametrize(
+    ('text', 'width'),
+    [
+        ('\033(B\033[mab', 2),  # tput sgr0
+        ('\033[>4;1mab\033[2~', 2),  # private parameters, a non-letter final byte
+        ('\033Mab', 2),  # a two-byte escape
+        ('a\ufe0f', 1),  # a letter has no emoji form
+        ('\U0001f44d\u200dabc', 5),  # a joiner hides a pictograph, not a letter
+        ('日\u200d本', 4),
+        ('가\ud7cb', 2),  # an archaic Hangul final
+    ],
+)
+def test_width_edge_cases(text: str, width: int) -> None:
+    assert term_styling._width(text) == width
+
+
 def test_table_cell_stays_on_one_line() -> None:
     out = term_styling.table([('a\r\nb', 'x'), ('c\td', 'y'), ('e\rf', 'z')], tier_=0)
     assert out == 'a b  x\nc d  y\ne f  z'
+    out = term_styling.table([('a\x85b\u2028c\x9bd', 'x')], tier_=0)
+    assert out.splitlines() == ['a b c d  x']
+
+
+def test_table_keeps_another_librarys_escapes_whole() -> None:
+    # The BEL ending this hyperlink is part of the escape, not a control to scrub.
+    bel = '\033]8;;http://x\aab\033]8;;\a'
+    assert term_styling.table([(bel, 'x'), ('abcd', 'y')], tier_=1) == (
+        f'{bel}    x\nabcd  y'
+    )
+
+
+def test_table_none_cell_follows_the_tier() -> None:
+    assert term_styling.table([(None, 'x')], tier_=0) == '-  x'
+    assert term_styling.table([(None, 'x')], tier_=1) == '—  x'
 
 
 def test_progress_is_silent_when_plain(
@@ -470,7 +501,9 @@ def test_progress_in_threads_keeps_every_line_whole(
 ) -> None:
     def work(name: str) -> None:
         for item in term_styling.progress(range(20), name, tier_=1):
-            print(f'{name} {item}', file=sys.stderr)
+            # One write per record: print() sends its newline separately, and two
+            # threads' halves may interleave, as they may without progress().
+            sys.stderr.write(f'{name} {item}\n')
 
     stderr = sys.stderr
     threads = [threading.Thread(target=work, args=(n,)) for n in ('a', 'b', 'c')]
@@ -488,8 +521,11 @@ def test_progress_in_threads_keeps_every_line_whole(
 class HungUpTTY(FakeTTY):
     """A terminal that accepts one write and then is gone."""
 
+    failed = 0
+
     def write(self, text: str) -> int:
         if self.getvalue():
+            self.failed += 1
             raise OSError(5, 'Input/output error')
         return super().write(text)
 
@@ -501,6 +537,7 @@ def test_progress_survives_a_terminal_that_hangs_up(
     monkeypatch.setattr(sys, 'stderr', screen)
     # The loop runs to the end, and its own exception is the one that surfaces.
     assert list(term_styling.progress(range(3), tier_=1)) == [0, 1, 2]
+    assert screen.failed == 1  # and a terminal that failed is not tried again
     with pytest.raises(ZeroDivisionError):
         for item in term_styling.progress(range(3), tier_=1):
             1 / item
@@ -533,6 +570,35 @@ def test_progress_through_a_wrapper_around_its_own_stand_in(
     assert 'again' in screen.getvalue()[len(before) :]
     assert 'above\n' in screen.getvalue()
     assert not term_styling._LIVE.bars
+
+
+def test_stand_in_is_the_stream_for_everything_but_writing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    screen = Utf8TTY()
+    monkeypatch.setattr(sys, 'stderr', screen)
+    for _ in term_styling.progress(range(1), tier_=1):
+        assert sys.stderr is not screen
+        assert sys.stderr.isatty()
+        assert sys.stderr.encoding == 'utf-8'
+        assert term_styling.tier(sys.stderr) == term_styling.tier(screen)
+        sys.stderr.writelines(['a\n', 'b\n'])
+    assert 'a\nb\n' in screen.getvalue()
+
+
+def test_terminal_stdout_and_stderr_are_both_wrapped(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out, err = FakeTTY(), FakeTTY()
+    monkeypatch.setattr(sys, 'stdout', out)
+    monkeypatch.setattr(sys, 'stderr', err)
+    for _ in term_styling.progress(range(1), tier_=1):
+        print('result')
+    assert (sys.stdout, sys.stderr) == (out, err)
+    assert out.getvalue() == 'result\n'
+    bar0 = '\r' + DIM.format('━' * 30) + ' 0/1\033[K'
+    # The bar goes before stdout prints and comes back after its line ends.
+    assert err.getvalue() == bar0 + ERASE + bar0 + ERASE
 
 
 def test_progress_without_a_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -598,7 +664,8 @@ def test_bar_without_total_or_room() -> None:
     # An empty run does not divide.
     assert term_styling._bar(0, 0, '', 1, 80) == '0 0:00'
     # No room: no bar.
-    assert term_styling._bar(1, 2, 'sync', 1, 12, 4) == 'sync 1/2 eta 0:04'
+    assert term_styling._bar(1, 2, 'sync', 1, 12, 4) == 'sync 1/2'
+    assert term_styling._bar(1, 2, 'sync', 1, 18, 4) == 'sync 1/2 eta 0:04'
     # A wrong total neither overflows the bar nor estimates.
     assert term_styling._bar(9, 2, '', 1, 80) == '━' * 30 + ' 9/2'
     assert term_styling._bar(0, 2, '', 1, 80, 9) == DIM.format('━' * 30) + ' 0/2'

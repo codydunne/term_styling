@@ -198,20 +198,38 @@ def divider(tier_: int | None = None) -> str:
 
 # What paint() and link() wrap around text: zero columns wide on screen.
 _NO_WIDTH = ('Mn', 'Me', 'Cf')
-# Escapes fill no columns: any CSI sequence and any OSC string, so a cell another
-# library styled (a 24-bit color, an OSC 8 link with an id) measures right too.
-_ESCAPE = re.compile(r'\033\[[0-9;:?]*[A-Za-z]|\033\][^\033\a]*(?:\033\\|\a)')
-# Every control character but ESC, which the escapes above need.
-_CONTROL = re.compile(r'\r\n|[\x00-\x1a\x1c-\x1f\x7f]')
+# Escapes fill no columns: any CSI sequence, any OSC string, and the two- and
+# three-byte escapes (`tput sgr0` sends ESC ( B), so a cell another library styled
+# measures right too.
+_ESCAPE = re.compile(
+    r'\033\[[0-?]*[ -/]*[@-~]'
+    r'|\033\][^\033\a]*(?:\033\\|\a)'
+    r'|\033[()*+][0-9A-Za-z]'
+    r'|\033[@-Z\\^_]'
+)
+# Every C0 and C1 control but ESC, and the two Unicode line breaks.
+_CONTROL = re.compile(r'\r\n|[\x00-\x1a\x1c-\x1f\x7f-\x9f\u2028\u2029]')
 
 
 def _one_line(text: object) -> str:
     """`text` with each line break, tab, and other control character as a space.
 
     A table row or progress line has to stay one line, and a tab or carriage return
-    moves the cursor by an amount nothing here can measure.
+    moves the cursor by an amount nothing here can measure. Escapes are kept whole:
+    the BEL that ends another library's hyperlink is not a stray control character.
     """
-    return _CONTROL.sub(' ', str(text))
+    text = str(text)
+    out, end = [], 0
+    for escape in _ESCAPE.finditer(text):
+        out += [_CONTROL.sub(' ', text[end : escape.start()]), escape[0]]
+        end = escape.end()
+    return ''.join(out) + _CONTROL.sub(' ', text[end:])
+
+
+def _pictograph(code: int) -> bool:
+    """Whether a zero-width joiner or U+FE0F can make this codepoint part of an emoji:
+    the arrows-to-symbols blocks (♂, ❤, ⚠) and the emoji planes, but no letter."""
+    return 0x2190 <= code <= 0x2BFF or 0x1F000 <= code <= 0x1FAFF
 
 
 def _width(text: str) -> int:
@@ -219,24 +237,30 @@ def _width(text: str) -> int:
 
     Escapes and combining marks fill none and East Asian wide characters two. An emoji
     built from several codepoints is measured as the one glyph a terminal draws: a
-    zero-width joiner after a wide glyph hides the codepoint that follows, U+FE0F
-    widens a narrow symbol to two, a skin tone adds nothing, and a flag's two regional
-    indicators make two. Hangul vowels and finals join the syllable before them.
+    zero-width joiner between two pictographs hides the second, U+FE0F widens a narrow
+    symbol to two, a skin tone adds nothing, and a flag's two regional indicators make
+    two. Hangul vowels and finals join the syllable before them.
     """
-    width = last = 0
-    chars = iter(_ESCAPE.sub('', text))
-    for ch in chars:
+    width = last = prev = 0
+    chars = _ESCAPE.sub('', text)
+    i = 0
+    while i < len(chars):
+        ch = chars[i]
         code = ord(ch)
+        i += 1
         if code == 0x200D:
-            # Only an emoji sequence: between letters a joiner shapes, it does not hide.
-            if last == 2:
-                next(chars, None)
+            # Only an emoji sequence: between letters a joiner shapes, it hides nothing.
+            if last == 2 and i < len(chars) and _pictograph(ord(chars[i])):
+                i += 1
         elif code == 0xFE0F:
-            width += 2 - last if last == 1 else 0
-            last = 2
+            # A keycap's digit takes it too; a letter has no emoji form to select.
+            if last == 1 and (_pictograph(prev) or chr(prev) in '#*0123456789'):
+                width += 1
+                last = 2
         elif (
             0x1F3FB <= code <= 0x1F3FF
             or 0x1160 <= code <= 0x11FF
+            or 0xD7B0 <= code <= 0xD7FF
             or unicodedata.category(ch) in _NO_WIDTH
         ):
             continue
@@ -246,6 +270,7 @@ def _width(text: str) -> int:
             wide = unicodedata.east_asian_width(ch) in ('W', 'F')
             last = 2 if wide and not 0x1F1E6 <= code <= 0x1F1FF else 1
             width += last
+            prev = code
     return width
 
 
@@ -318,16 +343,19 @@ def _bar(
 ) -> str:
     """One progress line: `label ━━━━━━ 3/10 eta 0:07`, or `label 3 0:02` uncounted.
 
-    The bar is dropped when it cannot fit. The estimate is the mean pace so far, shown
-    once an item has finished.
+    The bar is dropped when it cannot fit, and before it the estimate. The estimate is
+    the mean pace so far, shown once an item has finished.
     """
+    parts = [label] if label else []
     if total:
         tail = f'{done}/{total}'
         if 0 < done < total:
-            tail += f' eta {_clock(elapsed * (total - done) / done)}'
+            eta = f'{tail} eta {_clock(elapsed * (total - done) / done)}'
+            # A line that wraps cannot be redrawn in place: the count matters more.
+            if _width(' '.join([*parts, eta])) < columns:
+                tail = eta
     else:
         tail = f'{done} {_clock(elapsed)}'
-    parts = [label] if label else []
     if total:
         # One column spare: a line that reaches the last column wraps on some terminals,
         # and then \r no longer returns to its start.

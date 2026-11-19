@@ -113,6 +113,7 @@ def capture(cmd: str, cwd: str) -> list:
             bursts[-1][2] += decode(chunk)
         else:
             bursts.append([now, now, decode(chunk)])
+    decode(b'', final=True)  # raises on output cut off mid-character
     proc.wait()
     os.close(master)
     return [(at, text) for at, _, text in bursts]

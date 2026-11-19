@@ -168,7 +168,7 @@ A3     -  held
 
 On a terminal the header is bold with a dim rule under it.
 `align` takes one `l` or `r` per column and is left where it runs out; any other character raises `ValueError` at every tier.
-Cells may be styled with `mark()`, `paint()`, or `link()`, or by another library: widths are measured without CSI and OSC escapes.
+Cells may be styled with `mark()`, `paint()`, or `link()`, or by another library: widths are measured without escape sequences, which are passed through whole.
 East Asian wide characters count as two columns, and so does an emoji built from several codepoints (a ZWJ family, a flag, a skin tone, a keycap).
 A `None` cell prints as the `none` symbol (`-`, or `—` on a terminal), and a line break, tab, or other control character inside a cell becomes a space.
 Cells are never wrapped or truncated, because a wrapped row is no longer one record.
@@ -189,7 +189,8 @@ uploading ━━━━━━━━━━━━━━━━━━━━━━━�
 ```
 
 At tier 0 (stderr piped, `CI`, `NO_COLOR`) it prints nothing at all and wraps nothing, so logs never collect redraws.
-The line is erased when the loop ends, breaks, or raises; print the outcome yourself.
+The line is erased when the loop ends, and when a `for` loop over it breaks or raises; print the outcome yourself.
+An iterator you keep in a variable is the exception: it holds its line until it is closed, so wrap it in `contextlib.closing` (see [Known limitations](#known-limitations)).
 `total` defaults to `len(items)`; an iterator without a length shows a running count and the time elapsed, with no bar.
 The estimate is the mean pace so far.
 Redraws for finished items are capped at ten a second; each line printed inside the loop costs one more.
