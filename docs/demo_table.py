@@ -1,4 +1,4 @@
-"""A document listing, recorded in demo-table.webp by make_demo.py.
+"""A document listing, recorded in demo-table-tier{0,1,2}.webp by make_demo.py.
 
 The same call three ways: a terminal, a terminal with a Nerd Font (the icons for
 folders, files, people, and times have no Unicode sign to fall back on), and a pipe.

@@ -16,7 +16,7 @@ See the same script for [the other displayed tiers 0 and 1](#tiers).
 
 There are two more demos further down: [tables](#tables), the counterpart of `uv run python -m rich.table`, and [progress lines](#progress), the counterpart of `uv run python -m rich.progress`.
 
-(Regenerate all five animations with `uv run docs/make_demo.py`; set `DEMO_FONT` and `DEMO_FONT_BOLD` to a Nerd Font for tier 2.)
+(Regenerate all nine animations, one per tier for each of the three demo scripts, with `uv run docs/make_demo.py`; set `DEMO_FONT` and `DEMO_FONT_BOLD` to a Nerd Font for tier 2.)
 
 ## Install
 
@@ -89,7 +89,7 @@ Install a [Nerd Font](https://www.nerdfonts.com/font-downloads), select it as yo
 Tier 2 changes two things.
 The outcome states (`ok`, `fail`, `warn`, ...) swap a Unicode symbol for a Font Awesome one, which is cosmetic.
 The thing states (`folder`, `branch`, `time`, `date`, `user`, `lock`, `cloud`, `tag`, `bug`) are where a Nerd Font earns its place: Unicode's only signs for them are double-width color emoji, so at tiers 0 and 1 `mark('folder', 'lectures/')` is the text alone, and at tier 2 it gains the icon.
-The [table demo](#tables) shows them at tier 1 and tier 2 side by side.
+The [table demo](#tables) shows the same listing at each tier.
 
 **macOS:**
 
@@ -166,7 +166,17 @@ term_styling.COLORS.update({'archived': '2'})
 
 `table(rows, headers=None, align='')` returns the rows as aligned columns, one line per row at every tier.
 
-![docs/demo_table.py: a document listing as a table, first on a plain terminal where folders, owners, and times are text alone and states are colored dots, then with NERD_FONT=1 where every cell gains an icon (folder, file, lock, bug, person, clock, eye for published, crossed eye for unpublished, pause for held) and the columns still line up; then piped through cat as plain rows and through grep as the one unpublished row](docs/demo-table.webp)
+With a Nerd Font (tier 2), every cell gains an icon and the columns still line up:
+
+![docs/demo_table.py with NERD_FONT=1: a document listing as a table with a bold header and dim rule, an icon in each cell (folder, file, lock, bug, person, clock, eye for published, crossed eye for unpublished, pause for held), and a branch, cloud, and tag icon in the title line](docs/demo-table-tier2.webp)
+
+On a terminal without one (tier 1), folders, owners, and times are the text alone and the states are colored dots:
+
+![docs/demo_table.py on a terminal at tier 1: the same table with no icons for folders, people, or times, and green, hollow, and half-filled dots for published, unpublished, and held](docs/demo-table-tier1.webp)
+
+Piped (tier 0), the same call prints plain records:
+
+![docs/demo_table.py at tier 0: piped through cat the table is space-padded ASCII rows with bracketed states, and piped through grep for the unpublished state it is the one matching row](docs/demo-table-tier0.webp)
 
 ```python
 rows = [
@@ -197,7 +207,15 @@ Cells are never wrapped or truncated, because a wrapped row is no longer one rec
 
 `progress(items, label='', total=None)` yields the items and redraws one line on **stderr**:
 
-![docs/demo_progress.py: two nested progress lines with counts and time estimates while results and a warning print above them, then a counting line for a stream of unknown length, all erased at the end; with stderr redirected, only the results print](docs/demo-progress.webp)
+![docs/demo_progress.py with NERD_FONT=1 at tier 2: two nested progress lines with counts and time estimates while results and a warning print above them with Nerd Font glyphs, then a counting line for a stream of unknown length, all erased at the end](docs/demo-progress-tier2.webp)
+
+The same at tier 1, with Unicode symbols:
+
+![docs/demo_progress.py on a terminal at tier 1: the same nested progress lines and counting line, with Unicode check marks and warning signs on the results above them](docs/demo-progress-tier1.webp)
+
+At tier 0 no line is drawn at all:
+
+![docs/demo_progress.py with NO_COLOR=1 at tier 0: only the results print, as plain ASCII lines, with no progress lines](docs/demo-progress-tier0.webp)
 
 ```python
 for path in term_styling.progress(paths, 'uploading'):

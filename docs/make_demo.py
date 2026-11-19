@@ -4,8 +4,9 @@
 # ///
 """Regenerate the animations in docs/: `uv run docs/make_demo.py` (Linux/macOS, needs a pty).
 
-Writes demo-tier{0,1,2}.webp from demo.py, demo-table.webp from demo_table.py, and
-demo-progress.webp from demo_progress.py.
+Writes one animation per tier for each script: demo-tier{0,1,2}.webp from demo.py,
+demo-table-tier{0,1,2}.webp from demo_table.py, and demo-progress-tier{0,1,2}.webp from
+demo_progress.py.
 
 Runs each script under a real pseudo-terminal once per command and replays the captured output
 with its timing, so the progress line animates. Only what term_styling emits is parsed: SGR
@@ -67,19 +68,24 @@ ANIMATIONS = {
     'demo-tier2': [
         [('NERD_FONT=1 uv run python demo.py', '# tier 2: Nerd Font glyphs')]
     ],
-    'demo-table': [
-        [
-            ('uv run python demo_table.py', '# a terminal'),
-            ('NERD_FONT=1 uv run python demo_table.py', '# ...with a Nerd Font'),
-        ],
+    'demo-table-tier0': [
         [
             ('uv run python demo_table.py | cat', '# piped: plain records'),
             ("uv run python demo_table.py | grep -F '[unpub]'", '# ...for grep'),
-        ],
+        ]
     ],
-    'demo-progress': [
-        [('uv run python demo_progress.py', '# a line per loop, output above')],
-        [('uv run python demo_progress.py 2> sync.log', '# stderr piped: no lines')],
+    'demo-table-tier1': [[('uv run python demo_table.py', '# a terminal: tier 1')]],
+    'demo-table-tier2': [
+        [('NERD_FONT=1 uv run python demo_table.py', '# tier 2: an icon per cell')]
+    ],
+    'demo-progress-tier0': [
+        [('NO_COLOR=1 uv run python demo_progress.py', '# tier 0: no lines drawn')]
+    ],
+    'demo-progress-tier1': [
+        [('uv run python demo_progress.py', '# a line per loop, output above')]
+    ],
+    'demo-progress-tier2': [
+        [('NERD_FONT=1 uv run python demo_progress.py', '# tier 2: Nerd Font glyphs')]
     ],
 }
 

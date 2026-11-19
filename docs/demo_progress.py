@@ -1,4 +1,4 @@
-"""Several progress lines at once, recorded in demo-progress.webp by make_demo.py."""
+"""Several progress lines at once, recorded in demo-progress-tier{0,1,2}.webp by make_demo.py."""
 
 import time
 from collections.abc import Iterator
