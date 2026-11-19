@@ -91,6 +91,8 @@ The outcome states (`ok`, `fail`, `warn`, ...) swap a Unicode symbol for a Font 
 The thing states (`folder`, `branch`, `time`, `date`, `user`, `lock`, `cloud`, `tag`, `bug`) are where a Nerd Font earns its place: Unicode's only signs for them are double-width color emoji, so at tiers 0 and 1 `mark('folder', 'lectures/')` is the text alone, and at tier 2 it gains the icon.
 The [table demo](#tables) shows the same listing at each tier.
 
+### Installing Nerd Fonts
+
 **macOS:**
 
 ```bash
