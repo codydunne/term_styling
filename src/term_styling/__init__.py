@@ -198,7 +198,20 @@ def divider(tier_: int | None = None) -> str:
 
 # What paint() and link() wrap around text: zero columns wide on screen.
 _NO_WIDTH = ('Mn', 'Me', 'Cf')
-_ESCAPE = re.compile(r'\033\[[0-9;]*m|\033\]8;;[^\033]*\033\\')
+# Escapes fill no columns: any CSI sequence and any OSC string, so a cell another
+# library styled (a 24-bit color, an OSC 8 link with an id) measures right too.
+_ESCAPE = re.compile(r'\033\[[0-9;:?]*[A-Za-z]|\033\][^\033\a]*(?:\033\\|\a)')
+# Every control character but ESC, which the escapes above need.
+_CONTROL = re.compile(r'\r\n|[\x00-\x1a\x1c-\x1f\x7f]')
+
+
+def _one_line(text: object) -> str:
+    """`text` with each line break, tab, and other control character as a space.
+
+    A table row or progress line has to stay one line, and a tab or carriage return
+    moves the cursor by an amount nothing here can measure.
+    """
+    return _CONTROL.sub(' ', str(text))
 
 
 def _width(text: str) -> int:
@@ -206,19 +219,26 @@ def _width(text: str) -> int:
 
     Escapes and combining marks fill none and East Asian wide characters two. An emoji
     built from several codepoints is measured as the one glyph a terminal draws: a
-    zero-width joiner hides the codepoint after it, U+FE0F widens a narrow symbol to
-    two, a skin tone adds nothing, and a flag's two regional indicators make two.
+    zero-width joiner after a wide glyph hides the codepoint that follows, U+FE0F
+    widens a narrow symbol to two, a skin tone adds nothing, and a flag's two regional
+    indicators make two. Hangul vowels and finals join the syllable before them.
     """
     width = last = 0
     chars = iter(_ESCAPE.sub('', text))
     for ch in chars:
         code = ord(ch)
-        if ch == '‍':
-            next(chars, None)
-        elif ch == '️':
+        if code == 0x200D:
+            # Only an emoji sequence: between letters a joiner shapes, it does not hide.
+            if last == 2:
+                next(chars, None)
+        elif code == 0xFE0F:
             width += 2 - last if last == 1 else 0
             last = 2
-        elif 0x1F3FB <= code <= 0x1F3FF or unicodedata.category(ch) in _NO_WIDTH:
+        elif (
+            0x1F3FB <= code <= 0x1F3FF
+            or 0x1160 <= code <= 0x11FF
+            or unicodedata.category(ch) in _NO_WIDTH
+        ):
             continue
         else:
             # Regional indicators by range, not east_asian_width: one each makes a
@@ -241,7 +261,8 @@ def table(
     so every line of a piped table is a record grep and awk can use. Tier 1 makes the
     header bold and adds a dim rule under it. `align` is one `l` or `r` per column
     (`'lr'`), left where it runs out. A None cell prints as the `none` symbol, so an
-    empty cell cannot shift the columns after it; a newline in a cell becomes a space.
+    empty cell cannot shift the columns after it; a line break, tab, or other control
+    character in a cell becomes a space.
 
     ponytail: cells are never wrapped or truncated, because a wrapped row is no longer
     one record. A table wider than the terminal wraps there; use rich for layout.
@@ -253,7 +274,7 @@ def table(
     none = SYMBOLS['none'][t]
 
     def texts(cells: Sequence[object]) -> list[str]:
-        return [none if c is None else str(c).replace('\n', ' ') for c in cells]
+        return [none if c is None else _one_line(c) for c in cells]
 
     head = texts(headers) if headers else []
     body = [texts(row) for row in rows]
@@ -323,7 +344,7 @@ class _Bar:
     """One running progress() loop."""
 
     def __init__(self, label: str, total: int | None, t: int) -> None:
-        self.label, self.total, self.tier = label, total, t
+        self.label, self.total, self.tier = _one_line(label), total, t
         self.done = 0
         self.start = time.monotonic()
 
@@ -340,6 +361,10 @@ class _Above:
 
     def write(self, text: str) -> int:
         with _LIVE.lock:
+            # No bars: a stand-in something kept a reference to. Busy: the bars' own
+            # write, coming back through a wrapper someone put around this stand-in.
+            if not _LIVE.bars or _LIVE.busy:
+                return self._stream.write(text)
             _LIVE.erase()
             written = self._stream.write(text)
             # stdout and stderr share the screen, so neither may sit in a buffer while
@@ -359,6 +384,24 @@ class _Above:
         return getattr(self._stream, name)
 
 
+def _columns(stream: object) -> int:
+    """The width of the terminal behind `stream`, for a line drawn on stderr.
+
+    Not shutil.get_terminal_size, which measures stdout: that is a file, or another
+    width entirely, exactly when stdout is redirected and the bar is all there is.
+    """
+    try:
+        columns = int(os.environ.get('COLUMNS', ''))
+    except ValueError:
+        columns = 0
+    if columns <= 0:
+        try:
+            columns = os.get_terminal_size(stream.fileno()).columns  # ty: ignore[unresolved-attribute]
+        except (AttributeError, OSError, ValueError):
+            columns = 0
+    return columns if columns > 0 else 80
+
+
 class _Live:
     """The progress lines on screen now, innermost loop last.
 
@@ -373,42 +416,74 @@ class _Live:
         self.fill = '━'
         self.drawn = 0  # lines on screen
         self.midline = False
+        self.busy = False
+        self.dead = False
         self.last = float('-inf')
 
     def add(self, bar: _Bar) -> None:
         with self.lock:
             if not self.bars:
-                self.out = sys.stderr
-                self.midline = False
+                out = sys.stderr
+                # A stand-in left behind (its loop's stream was swapped under it) is
+                # not the terminal: drawing through it would come straight back here.
+                while isinstance(out, _Above):
+                    out = out._stream
+                self.out = out
+                self.midline = self.dead = False
+                self.drawn = 0
                 try:
-                    '━'.encode(getattr(self.out, 'encoding', None) or 'utf-8')
+                    '━'.encode(getattr(out, 'encoding', None) or 'utf-8')
                     self.fill = '━'
                 except (LookupError, UnicodeEncodeError):
                     # Not in _PROBE, so adding the bar took tier 1 from no stream that
                     # had it; '─' is in _PROBE.
                     self.fill = '─'
-                sys.stderr = _Above(self.out)
+                if not isinstance(sys.stderr, _Above):
+                    sys.stderr = _Above(out)
                 try:
                     shared = sys.stdout.isatty()
                 except (AttributeError, ValueError):
                     shared = False
-                if shared:  # a piped stdout is not on the screen: left alone
+                # A piped stdout is not on the screen: left alone.
+                if shared and not isinstance(sys.stdout, _Above):
                     sys.stdout = _Above(sys.stdout)
             self.bars.append(bar)
             self.draw()
 
     def remove(self, bar: _Bar) -> None:
         with self.lock:
-            self.erase()
-            self.bars.remove(bar)
-            if self.bars:
-                self.draw()
-                return
-            # Only stand-ins still in place: a stream someone swapped meanwhile is theirs.
-            if isinstance(sys.stdout, _Above):
-                sys.stdout = sys.stdout._stream
-            if isinstance(sys.stderr, _Above):
-                sys.stderr = sys.stderr._stream
+            try:
+                self.erase()
+            finally:
+                # Whatever the terminal did, the loop is over: a bar or a stand-in
+                # left behind would haunt every later print in the process.
+                if bar in self.bars:
+                    self.bars.remove(bar)
+                if self.bars:
+                    self.draw()
+                else:
+                    # Only stand-ins still in place: a stream someone swapped
+                    # meanwhile is theirs.
+                    if isinstance(sys.stdout, _Above):
+                        sys.stdout = sys.stdout._stream
+                    if isinstance(sys.stderr, _Above):
+                        sys.stderr = sys.stderr._stream
+
+    def _write(self, text: str) -> None:
+        """To the terminal; one that fails (hung up, closed) is not written to again.
+
+        A progress line is never worth an exception in the caller's loop.
+        """
+        if self.dead:
+            return
+        self.busy = True
+        try:
+            self.out.write(text)
+            self.out.flush()
+        except (OSError, ValueError):
+            self.dead = True
+        finally:
+            self.busy = False
 
     def _home(self) -> str:
         """To the start of the first line drawn."""
@@ -417,19 +492,18 @@ class _Live:
     def erase(self) -> None:
         with self.lock:
             if self.drawn:
-                self.out.write(self._home() + '\033[J')
-                self.out.flush()
+                self._write(self._home() + '\033[J')
                 self.drawn = 0
 
     def draw(self, now: float | None = None) -> None:
         """Redraw every bar; given `now`, only if a tenth of a second has passed."""
         with self.lock:
-            if not self.bars or self.midline:
+            if not self.bars or self.midline or self.dead:
                 return
             if now is not None and now - self.last < 0.1:
                 return
             self.last = time.monotonic() if now is None else now
-            columns = shutil.get_terminal_size((80, 24)).columns or 80
+            columns = _columns(self.out)
             lines = [
                 _bar(
                     b.done,
@@ -443,8 +517,7 @@ class _Live:
                 + '\033[K'
                 for b in self.bars
             ]
-            self.out.write(self._home() + '\n'.join(lines))
-            self.out.flush()
+            self._write(self._home() + '\n'.join(lines))
             self.drawn = len(lines)
 
 
@@ -466,13 +539,19 @@ def progress(
 
     While a loop runs, sys.stderr (and sys.stdout, when it is a terminal too) is wrapped
     so that anything printed appears above the line. Loops may nest or run in threads:
-    each gets a line, in the order they started.
+    each gets a line, in the order they started. A line starts at the left margin, so
+    finish any half-printed line before the loop. A terminal that stops accepting
+    writes ends the drawing, not the loop.
 
-    ponytail: no refresh thread, so the line redraws when an item finishes or something
-    prints, and a label wider than the terminal wraps and smears. Use rich for those.
+    This is a generator, so the line goes when the generator is closed: at once for a
+    `for` loop, but an iterator you keep and abandon holds its line until `.close()`.
+
+    ponytail: no refresh thread, so the line redraws when an item finishes or a printed
+    line ends (a loop printing dots with end='' shows no bar), and a label wider than
+    the terminal wraps and smears. Use rich for those.
     """
     t = ERR_TIER if tier_ is None else tier_
-    if not t:
+    if not t or sys.stderr is None:  # pythonw: nowhere to draw
         yield from items
         return
     if total is None:
@@ -481,8 +560,8 @@ def progress(
         except TypeError:
             pass
     bar = _Bar(label, total, t)
-    _LIVE.add(bar)
     try:
+        _LIVE.add(bar)
         for item in items:
             yield item
             bar.done += 1
@@ -593,7 +672,7 @@ def selftest() -> int:
     )
     _same(_width(link('http://x', '日本', 1)), 4)
     # One glyph each, however many codepoints: family, flag, skin tone, keycap, U+FE0F.
-    for glyph in ('👨‍👩‍👧', '🇺🇸', '👍🏽', '1️⃣', '⚠️'):
+    for glyph in ('👨\u200d👩\u200d👧', '🇺🇸', '👍🏽', '1\ufe0f\u20e3', '⚠\ufe0f'):
         _same((glyph, _width(glyph)), (glyph, 2))
     _same(
         _bar(1, 2, 'sync', 1, 80, 3),

@@ -307,12 +307,12 @@ ERASE = '\r\033[J'
 @pytest.mark.parametrize(
     'glyph',
     [
-        '👨‍👩‍👧',  # ZWJ family
-        '🏳️‍🌈',  # ZWJ after a variation selector
+        '👨\u200d👩\u200d👧',  # ZWJ family
+        '🏳\ufe0f\u200d🌈',  # ZWJ after a variation selector
         '🇺🇸',  # two regional indicators
         '👍🏽',  # skin tone modifier
-        '1️⃣',  # keycap
-        '⚠️',  # narrow symbol with emoji presentation
+        '1\ufe0f\u20e3',  # keycap
+        '⚠\ufe0f',  # narrow symbol with emoji presentation
         '🏴\U000e0067\U000e0062\U000e0073\U000e0063\U000e0074\U000e007f',  # tag flag
         '日',
     ],
@@ -327,6 +327,26 @@ def test_width_counts_one_glyph_as_two_columns(glyph: str) -> None:
 def test_width_of_plain_and_narrow_text() -> None:
     assert term_styling._width('⚠ áb') == 4
     assert term_styling._width('‍') == 0  # a joiner with nothing to join
+    assert term_styling._width('a‍b') == 2  # between letters it hides nothing
+    assert term_styling._width('각') == 2  # one Hangul syllable block
+
+
+@pytest.mark.parametrize(
+    'styled',
+    [
+        '\033[38;2;255;0;0mab\033[0m',  # 24-bit color
+        '\033[38:2::255:0:0mab\033[m',  # ...in the colon form
+        '\033]8;id=1;http://x\033\\ab\033]8;;\033\\',  # a link with parameters
+        '\033]8;;http://x\aab\033]8;;\a',  # ...terminated by BEL
+    ],
+)
+def test_width_ignores_other_libraries_escapes(styled: str) -> None:
+    assert term_styling._width(styled) == 2
+
+
+def test_table_cell_stays_on_one_line() -> None:
+    out = term_styling.table([('a\r\nb', 'x'), ('c\td', 'y'), ('e\rf', 'z')], tier_=0)
+    assert out == 'a b  x\nc d  y\ne f  z'
 
 
 def test_progress_is_silent_when_plain(
@@ -463,6 +483,97 @@ def test_progress_in_threads_keeps_every_line_whole(
     text = re.sub(r'\r|\033\[\d*[AJK]|\033\[\d+m', '\n', capsys.readouterr().err)
     printed = [line for line in text.split('\n') if re.fullmatch(r'[abc] \d+', line)]
     assert sorted(printed) == sorted(f'{n} {i}' for n in 'abc' for i in range(20))
+
+
+class HungUpTTY(FakeTTY):
+    """A terminal that accepts one write and then is gone."""
+
+    def write(self, text: str) -> int:
+        if self.getvalue():
+            raise OSError(5, 'Input/output error')
+        return super().write(text)
+
+
+def test_progress_survives_a_terminal_that_hangs_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    screen = HungUpTTY()
+    monkeypatch.setattr(sys, 'stderr', screen)
+    # The loop runs to the end, and its own exception is the one that surfaces.
+    assert list(term_styling.progress(range(3), tier_=1)) == [0, 1, 2]
+    with pytest.raises(ZeroDivisionError):
+        for item in term_styling.progress(range(3), tier_=1):
+            1 / item
+    assert sys.stderr is screen
+    assert not term_styling._LIVE.bars
+
+
+def test_progress_through_a_wrapper_around_its_own_stand_in(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Tee:
+        def __init__(self, stream: object) -> None:
+            self.stream = stream
+
+        def write(self, text: str) -> int:
+            return self.stream.write(text)  # ty: ignore[unresolved-attribute]
+
+        def flush(self) -> None:
+            pass
+
+    screen = FakeTTY()
+    monkeypatch.setattr(sys, 'stderr', screen)
+    for _ in term_styling.progress(range(1), tier_=1):
+        tee = Tee(sys.stderr)  # another library wraps whatever stderr is right now
+        monkeypatch.setattr(sys, 'stderr', tee)
+    assert sys.stderr is tee  # not ours to undo
+    before = screen.getvalue()
+    for _ in term_styling.progress(range(1), 'again', tier_=1):
+        print('above', file=sys.stderr)
+    assert 'again' in screen.getvalue()[len(before) :]
+    assert 'above\n' in screen.getvalue()
+    assert not term_styling._LIVE.bars
+
+
+def test_progress_without_a_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, 'stderr', None)  # pythonw
+    assert list(term_styling.progress(range(2), tier_=1)) == [0, 1]
+
+
+def test_progress_label_stays_on_one_line(
+    clock: Clock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for _ in term_styling.progress(range(1), 'week\n1\tsync', tier_=1):
+        pass
+    assert capsys.readouterr().err.startswith('\rweek 1 sync ')
+
+
+def test_bar_width_is_the_stderr_terminals(monkeypatch: pytest.MonkeyPatch) -> None:
+    # `script > log` in a 40-column terminal: stdout is a file, and its "width" is not
+    # the width of the screen the bar is drawn on.
+    class Narrow(FakeTTY):
+        def fileno(self) -> int:
+            return 99
+
+    monkeypatch.delenv('COLUMNS', raising=False)
+    monkeypatch.setattr(
+        os,
+        'get_terminal_size',
+        lambda fd: os.terminal_size((40 if fd == 99 else 200, 24)),
+    )
+    assert term_styling._columns(Narrow()) == 40
+    assert term_styling._columns(io.StringIO()) == 80  # no terminal behind it
+    monkeypatch.setenv('COLUMNS', '55')
+    assert term_styling._columns(Narrow()) == 55
+    monkeypatch.setenv('COLUMNS', 'wide')
+    assert term_styling._columns(Narrow()) == 40
+    screen = Narrow()
+    monkeypatch.setattr(sys, 'stderr', screen)
+    for _ in term_styling.progress(range(4), 'syncing', tier_=1):
+        pass
+    frames = [f for f in screen.getvalue().split('\r') if f]
+    assert frames
+    assert all(term_styling._width(frame) < 40 for frame in frames)
 
 
 def test_bar_falls_back_when_the_stream_lacks_the_heavy_rule(

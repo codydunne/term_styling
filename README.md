@@ -168,9 +168,9 @@ A3     -  held
 
 On a terminal the header is bold with a dim rule under it.
 `align` takes one `l` or `r` per column and is left where it runs out; any other character raises `ValueError` at every tier.
-Cells may be styled with `mark()`, `paint()`, or `link()`: widths are measured without the escapes.
+Cells may be styled with `mark()`, `paint()`, or `link()`, or by another library: widths are measured without CSI and OSC escapes.
 East Asian wide characters count as two columns, and so does an emoji built from several codepoints (a ZWJ family, a flag, a skin tone, a keycap).
-A `None` cell prints as the `none` symbol (`-`, or `—` on a terminal), and a newline inside a cell becomes a space.
+A `None` cell prints as the `none` symbol (`-`, or `—` on a terminal), and a line break, tab, or other control character inside a cell becomes a space.
 Cells are never wrapped or truncated, because a wrapped row is no longer one record.
 
 ### Progress
@@ -191,7 +191,10 @@ uploading ━━━━━━━━━━━━━━━━━━━━━━━�
 At tier 0 (stderr piped, `CI`, `NO_COLOR`) it prints nothing at all and wraps nothing, so logs never collect redraws.
 The line is erased when the loop ends, breaks, or raises; print the outcome yourself.
 `total` defaults to `len(items)`; an iterator without a length shows a running count and the time elapsed, with no bar.
-The estimate is the mean pace so far, and redraws are capped at ten a second.
+The estimate is the mean pace so far.
+Redraws for finished items are capped at ten a second; each line printed inside the loop costs one more.
+The line is as wide as stderr's terminal allows (or `COLUMNS`), whatever stdout is.
+If the terminal stops accepting writes, the drawing stops and the loop carries on.
 
 While a loop runs, `sys.stderr` is replaced by a thin stand-in, and `sys.stdout` too when it is a terminal, so anything printed inside the loop appears above the line and both streams are restored afterwards.
 A piped `sys.stdout` is left untouched.
@@ -284,7 +287,10 @@ uv run --isolated --no-project --with dist/*.whl python -m term_styling
   `NO_COLOR=1` is the workaround.
   Not handled in code: turning VT processing on takes Win32 console calls, and nothing here tests them yet.
 - Column widths follow the Unicode rules, but terminals disagree about emoji: some draw a ZWJ sequence as separate glyphs or a U+FE0F symbol one column wide, and a table row holding one can be off by a column there.
-- Writes that bypass `sys.stdout`/`sys.stderr` during `progress()` (`sys.stdout.buffer`, `os.write`, a subprocess sharing the terminal) are not moved above the line, and a label wider than the terminal smears.
+- `progress()` moves only what is written through `sys.stdout`/`sys.stderr` above its line. A `logging` handler created before the loop holds the real stream, so its records land on the line, as do `sys.stdout.buffer`, `os.write`, and a subprocess sharing the terminal.
+- A progress line starts at the left margin and erases what is there: finish a half-printed line (`print('Fetching... ', end='')`) before the loop. Inside the loop the line waits for a printed line to end, so a loop that prints dots with `end=''` shows no bar.
+- A label wider than the terminal smears the redraw.
+- `progress()` is a generator: an iterator that is kept and abandoned part-way holds its line until it is closed (`.close()`, or `contextlib.closing`). A plain `for` loop closes it on `break`.
 - Colors are the 16-color SGR set only; there is no truecolor or 256-color path.
 - The encoding probe covers the base symbols (the progress bar's `━` is outside it and falls back to `─`). A caller's own symbols outside that set (`●`, say) are not checked, though in practice any encoding that prints all of the base set is a Unicode one.
 

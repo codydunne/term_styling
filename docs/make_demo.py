@@ -13,6 +13,7 @@ DEMO_FONT_BOLD to another's files. Characters that font lacks are drawn from Dej
 Mono; a character neither has is an error.
 """
 
+import codecs
 import os
 import pty
 import re
@@ -96,7 +97,9 @@ def capture(cmd: str, cwd: str) -> list:
         cmd, shell=True, cwd=cwd, env=env, stdout=slave, stderr=slave
     )
     os.close(slave)
-    bursts: list = []  # [first byte's time, last byte's time, bytes]
+    # A character can straddle two reads, and so two bursts.
+    decode = codecs.getincrementaldecoder('utf-8')().decode
+    bursts: list = []  # [first byte's time, last byte's time, text]
     while True:
         try:
             chunk = os.read(master, 4096)
@@ -107,12 +110,12 @@ def capture(cmd: str, cwd: str) -> list:
         now = time.monotonic() - start
         if bursts and now - bursts[-1][1] < BURST:
             bursts[-1][1] = now
-            bursts[-1][2] += chunk
+            bursts[-1][2] += decode(chunk)
         else:
-            bursts.append([now, now, chunk])
+            bursts.append([now, now, decode(chunk)])
     proc.wait()
     os.close(master)
-    return [(at, data.decode()) for at, _, data in bursts]
+    return [(at, text) for at, _, text in bursts]
 
 
 class Screen:

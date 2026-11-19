@@ -6,7 +6,7 @@ import term_styling
 from term_styling import change, divider, link, mark, paint, progress, table
 
 # A state of the script's own: mark() and paint() pick it up at every tier.
-term_styling.SYMBOLS['held'] = ('[~]', '◐', '')
+term_styling.SYMBOLS['held'] = ('[~]', '◐', '\uf04c')
 term_styling.COLORS['held'] = '35'
 
 results = {
