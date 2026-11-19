@@ -39,7 +39,7 @@ In a single-file script with [PEP 723](https://peps.python.org/pep-0723/) inline
 ### From the repository
 
 For changes on `main` that are not released yet, depend on the git repository.
-Pin a release tag (`@v0.2.0`) or a full commit hash so later pushes cannot change what you get:
+Pin a release tag (`@v0.2.1`) or a full commit hash so later pushes cannot change what you get:
 
 ```bash
 uv add git+https://github.com/codydunne/term_style --rev <tag or full commit hash>
@@ -171,6 +171,7 @@ PyPI never lets you reuse a version number, even after a deletion, so a bad uplo
 Publishing runs in GitHub Actions (`.github/workflows/release.yml`) through [trusted publishing](https://docs.pypi.org/trusted-publishers/), so there are no API tokens to create or store.
 Pushing a `vX.Y.Z` tag publishes to PyPI; running the workflow by hand publishes to TestPyPI.
 The version lives in `pyproject.toml` and, as a literal so vendored copies carry it too, in `__version__` in `src/term_styling/__init__.py`; a test fails if they differ.
+Tests also fail if the newest `CHANGELOG.md` entry or the versions named in this README (the `@vX.Y.Z` tag example and the capped install ranges) do not match, and the release workflow runs them before building.
 
 ### Initial release
 
@@ -184,7 +185,7 @@ One-time setup, then the same steps as every later release:
 
 ### Updates
 
-1. Bump the version, set the same `__version__` in `src/term_styling/__init__.py`, and add a `CHANGELOG.md` entry:
+1. Bump the version, set the same `__version__` in `src/term_styling/__init__.py`, add a `## X.Y.Z — YYYY-MM-DD` entry at the top of `CHANGELOG.md`, and update the versions named in this README ([Install](#install)):
 
    ```bash
    uv version --bump patch   # or minor / major; also updates uv.lock
@@ -197,7 +198,7 @@ One-time setup, then the same steps as every later release:
    uv run --isolated --no-project --index https://test.pypi.org/simple/ --with term-styling==$(uv version --short) python -m term_styling
    ```
 
-4. Tag the green commit and push the tag. The workflow checks that the tag matches `pyproject.toml`, builds, runs the selftest on the wheel, and publishes:
+4. Tag the green commit and push the tag. The workflow checks that the tag matches `pyproject.toml`, runs the tests, builds, runs the selftest on the wheel, and publishes:
 
    ```bash
    git tag -a "v$(uv version --short)" -m "term-styling $(uv version --short)" && git push origin "v$(uv version --short)"
