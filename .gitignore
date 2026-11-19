@@ -6,3 +6,5 @@ __pycache__/
 dist/
 .venv
 .env*
+# Demo recordings: built by docs/make_demo.py, published on the media branch.
+docs/*.webp
