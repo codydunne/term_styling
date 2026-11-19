@@ -189,8 +189,19 @@ uploading ━━━━━━━━━━━━━━━━━━━━━━━�
 ```
 
 At tier 0 (stderr piped, `CI`, `NO_COLOR`) it prints nothing at all and wraps nothing, so logs never collect redraws.
-The line is erased when the loop ends, and when a `for` loop over it breaks or raises; print the outcome yourself.
-An iterator you keep in a variable is the exception: it holds its line until it is closed, so wrap it in `contextlib.closing` (see [Known limitations](#known-limitations)).
+The line is erased when the loop runs to its end; print the outcome yourself.
+After a `break` or an exception it is erased when the generator is closed.
+CPython does that at once for a `for` loop written directly over the call, but the language does not promise it, and an iterator you keep in a variable holds its line until you close it.
+Where that matters, close it yourself:
+
+```python
+from contextlib import closing
+
+with closing(term_styling.progress(paths, 'uploading')) as items:
+    for path in items:
+        if not upload(path):
+            break
+```
 `total` defaults to `len(items)`; an iterator without a length shows a running count and the time elapsed, with no bar.
 The estimate is the mean pace so far.
 Redraws for finished items are capped at ten a second; each line printed inside the loop costs one more.
@@ -291,7 +302,7 @@ uv run --isolated --no-project --with dist/*.whl python -m term_styling
 - `progress()` moves only what is written through `sys.stdout`/`sys.stderr` above its line. A `logging` handler created before the loop holds the real stream, so its records land on the line, as do `sys.stdout.buffer`, `os.write`, and a subprocess sharing the terminal.
 - A progress line starts at the left margin and erases what is there: finish a half-printed line (`print('Fetching... ', end='')`) before the loop. Inside the loop the line waits for a printed line to end, so a loop that prints dots with `end=''` shows no bar.
 - A label wider than the terminal smears the redraw.
-- `progress()` is a generator: an iterator that is kept and abandoned part-way holds its line until it is closed (`.close()`, or `contextlib.closing`). A plain `for` loop closes it on `break`.
+- `progress()` is a generator: after a `break` or an exception its line stays until the generator is closed. CPython closes one that nothing else refers to at once; other implementations may not, and an iterator kept in a variable is never closed for you. Use `contextlib.closing` (see [Progress](#progress)) for a guarantee.
 - Colors are the 16-color SGR set only; there is no truecolor or 256-color path.
 - The encoding probe covers the base symbols (the progress bar's `━` is outside it and falls back to `─`). A caller's own symbols outside that set (`●`, say) are not checked, though in practice any encoding that prints all of the base set is a Unicode one.
 

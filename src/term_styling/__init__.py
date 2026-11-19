@@ -581,8 +581,10 @@ def progress(
     finish any half-printed line before the loop. A terminal that stops accepting
     writes ends the drawing, not the loop.
 
-    This is a generator, so the line goes when the generator is closed: at once for a
-    `for` loop, but an iterator you keep and abandon holds its line until `.close()`.
+    This is a generator, so after a break or an exception the line goes when the
+    generator is closed. CPython closes one nothing else refers to at once; the language
+    does not promise that, and an iterator you keep holds its line until `.close()`.
+    Wrap the call in contextlib.closing() where the cleanup has to be certain.
 
     ponytail: no refresh thread, so the line redraws when an item finishes or a printed
     line ends (a loop printing dots with end='' shows no bar), and a label wider than
