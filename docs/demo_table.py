@@ -1,29 +1,49 @@
-"""Everything a table cell can hold, recorded in demo-table.webp by make_demo.py."""
+"""A document listing, recorded in demo-table.webp by make_demo.py.
 
-import term_styling
-from term_styling import link, mark, paint, table
+The same call three ways: a terminal, a terminal with a Nerd Font (the icons for
+folders, files, people, and times have no Unicode sign to fall back on), and a pipe.
+"""
 
-# A state of the script's own, as in demo.py.
-term_styling.SYMBOLS['held'] = ('[~]', '◐', '')
-term_styling.COLORS['held'] = '35'
+from term_styling import mark, paint, table
 
 
-def page(name: str) -> str:
-    """The assignment's id, clickable on a terminal and followed by its URL in a pipe."""
-    return link(f'https://x.org/{name.lower()}', name)
+def doc(
+    kind: str, name: str, owner: str, edited: str, words: object, state: str
+) -> tuple:
+    """One row: every cell but the count carries an icon where the terminal has one."""
+    states = {
+        'published': mark('published', 'published'),
+        'unpublished': mark('unpublished', 'unpublished'),
+        'held': mark('held', 'held for review'),
+        'broken': mark('fail', 'broken link'),
+    }
+    return (
+        mark(kind, name),
+        mark('user', owner),
+        mark('time', edited),
+        words,
+        states[state],
+    )
 
 
 rows = [
-    (page('A1'), 'Scatterplots', 10, mark('ok', 'in sync')),
-    (page('A2'), 'Color scales', 10, mark('new', 'created')),
-    (page('A3'), 'Networks', 12, mark('warn', 'points differ')),
-    (page('A4'), 'Maps', 8, mark('held', 'in review')),
-    (page('A5'), 'Uncertainty', 100, mark('fail', 'rejected')),
-    # None is the `none` symbol at every tier, so no later column can shift left.
-    (page('A6'), paint('withdrawn', 'dim'), None, mark('none', 'skipped')),
+    doc('folder', 'lectures/', 'cody', '09-18 09:12', None, 'published'),
+    doc('file', 'syllabus.md', 'cody', '09-02 14:30', 1840, 'published'),
+    doc('file', 'a1-scatterplots.md', 'kim', '09-17 23:59', 620, 'published'),
+    doc('file', 'a2-color.md', 'kim', '09-18 08:05', 540, 'held'),
+    doc('lock', 'grades.csv', 'cody', '09-18 09:10', None, 'unpublished'),
+    doc('bug', 'a3-networks.md', 'sam', '09-16 11:41', 71, 'broken'),
 ]
 
-print(paint('Assignments', 'head'))
-# One `l` or `r` per column. Cells are measured without their escapes, so the colored
-# and linked ones line up; piped, the same call prints plain records.
-print(table(rows, headers=('id', 'title', 'points', 'state'), align='llr'))
+print(
+    paint('Course site', 'head'),
+    mark('branch', 'main'),
+    mark('cloud', 'x.org/ds4200'),
+    mark('tag', 'fall-2026'),
+    sep='  ',
+)
+# One `l` or `r` per column. Cells are measured without their escapes and with their
+# icons, so every tier lines up; None is the `none` symbol, so no column shifts left.
+print(
+    table(rows, headers=('document', 'owner', 'edited', 'words', 'state'), align='lllr')
+)

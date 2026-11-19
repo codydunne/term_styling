@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import encodings.aliases
 import importlib.metadata
 import io
 import os
@@ -722,6 +723,66 @@ def test_bar_falls_back_when_the_stream_lacks_the_heavy_rule(
 def test_probe_is_unchanged_from_0_2() -> None:
     # A new symbol must not take tier 1 away from a stream that had it.
     assert term_styling._PROBE == '✓✗⚠→—✎≡─'
+
+
+def test_probe_stands_for_every_base_symbol() -> None:
+    # The probe is eight characters, not the whole table: any encoding that holds them
+    # has to hold every other tier 1 and tier 2 symbol too, or mark() could still crash.
+    symbols = ''.join(forms[1] + forms[2] for forms in term_styling.SYMBOLS.values())
+    capable = []
+    for name in sorted(set(encodings.aliases.aliases.values())):
+        try:
+            term_styling._PROBE.encode(name)
+        except (LookupError, UnicodeEncodeError):
+            continue
+        symbols.encode(name)
+        ('━' + '─').encode(name)
+        capable.append(name)
+    assert 'utf_8' in capable
+
+
+@pytest.mark.parametrize(
+    ('kind', 'plain', 'unicode'),
+    [
+        ('published', '[pub] x', '\033[32m● x\033[0m'),
+        ('unpublished', '[unpub] x', '\033[2m○ x\033[0m'),
+        ('held', '[held] x', '\033[35m◐ x\033[0m'),
+    ],
+)
+def test_document_states(kind: str, plain: str, unicode: str) -> None:
+    assert term_styling.mark(kind, 'x', 0) == plain
+    assert term_styling.mark(kind, 'x', 1) == unicode
+    glyph = term_styling.SYMBOLS[kind][2]
+    assert 0xF000 <= ord(glyph) <= 0xF2E0  # Font Awesome, as the other glyphs are
+    assert glyph in term_styling.mark(kind, 'x', 2)
+
+
+@pytest.mark.parametrize(
+    'kind',
+    ['folder', 'branch', 'time', 'date', 'user', 'lock', 'cloud', 'tag', 'bug'],
+)
+def test_noun_icons_appear_only_with_a_nerd_font(kind: str) -> None:
+    assert term_styling.mark(kind, 'x', 0) == 'x'
+    assert term_styling.mark(kind, 'x', 1) == 'x'
+    glyph = term_styling.SYMBOLS[kind][2]
+    assert 0xF000 <= ord(glyph) <= 0xF2E0
+    assert term_styling.mark(kind, 'x', 2) == f'{glyph} x'
+
+
+def test_transfer_icons_have_arrows_without_a_nerd_font() -> None:
+    assert term_styling.mark('download', 'x', 0) == 'x'
+    assert term_styling.mark('download', 'x', 1) == '↓ x'
+    assert term_styling.mark('upload', 'x', 1) == '↑ x'
+
+
+def test_icon_cells_keep_a_table_aligned() -> None:
+    rows = [
+        (term_styling.mark('folder', 'lectures/', 2), 'x'),
+        (term_styling.mark('held', 'a2.md', 2), 'x'),
+        ('syllabus.md', 'x'),
+    ]
+    lines = term_styling.table(rows, tier_=2).splitlines()
+    assert {term_styling._width(line) for line in lines} == {14}
 
 
 def test_bar_without_total_or_room() -> None:

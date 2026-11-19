@@ -5,7 +5,7 @@ Script output that reads well everywhere it lands: terminals, pipes, and log fil
 - 📄 **Plain ASCII when piped** (`[OK]`, `[!]`, `A1  https://…`), so logs stay greppable
 - 🎨 **Unicode symbols and 16-color SGR** on a terminal
 - 🔗 **Clickable [OSC 8](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda) hyperlinks** where supported
-- ✨ **[Nerd Font](https://www.nerdfonts.com/) glyphs** when asked for
+- ✨ **[Nerd Font](https://www.nerdfonts.com/) icons** when asked for: folders, files, people, times, and document states that Unicode has no sign for
 - 📊 **Tables and progress bars** that turn into plain records and silence when piped
 - 🔀 **Per-stream detection**: piped stdout and terminal stderr each style correctly
 - 🐍 **Standard library only**, Python 3.9+
@@ -80,7 +80,11 @@ In a terminal without a Nerd Font:
 
 ### Tier 2: Enabling Top-Tier Formatting
 
-See the demo at the top!
+See the demo at the top, and the [table demo](#tables) for the icons that have no tier 1 form.
+
+Tier 2 changes two things.
+The outcome states (`ok`, `fail`, `warn`, ...) swap a Unicode symbol for a Font Awesome one, which is cosmetic.
+The thing states (`folder`, `branch`, `time`, `date`, `user`, `lock`, `cloud`, `tag`, `bug`) are where a Nerd Font earns its place: Unicode's only signs for them are double-width color emoji, so at tiers 0 and 1 `mark('folder', 'lectures/')` is the text alone, and at tier 2 it gains the icon.
 
 Install a [Nerd Font](https://www.nerdfonts.com/font-downloads), select it as your terminal's font, and set `NERD_FONT=1`.
 
@@ -137,20 +141,29 @@ term_styling.die('cannot continue', code=2)  # red on stderr, then exit
 
 `SYMBOLS` maps a state to its `(plain, unicode, glyph)` forms and `COLORS` to its SGR code.
 A script with states of its own extends both, and `mark()`/`paint()` pick them up.
-A state needs a symbol to be marked but not a color (`arrow`, `none`, `edit`, and `file` have none), and `mark()` leaves an uncolored state plain.
-A state whose symbol is empty at a tier (`edit` and `file` at tier 0) marks as the text alone.
+A state needs a symbol to be marked but not a color (`arrow`, `none`, `edit`, `file`, and the thing states have none), and `mark()` leaves an uncolored state plain.
+A state whose symbol is empty at a tier (`edit` and `file` at tier 0, the thing states below tier 2) marks as the text alone.
+
+| states | tier 0 | tier 1 | tier 2 |
+|---|---|---|---|
+| `ok` `fail` `warn` `info` `new` | `[OK]` `[x]` `[!]` `[i]` `+` | `✓` `✗` `⚠` `i` `+` | check, cross, triangle, info, plus |
+| `published` `unpublished` `held` | `[pub]` `[unpub]` `[held]` | `●` `○` `◐` | eye, crossed eye, pause |
+| `arrow` `none` | `->` `-` | `→` `—` | `→` `—` |
+| `edit` `file` | nothing | `✎` `≡` | pencil, document |
+| `download` `upload` | nothing | `↓` `↑` | download, upload |
+| `folder` `branch` `time` `date` `user` `lock` `cloud` `tag` `bug` | nothing | nothing | an icon each |
 `paint()` needs a color and raises `KeyError` for an unknown one at every tier, so a typo fails in a piped test run, not only in a terminal.
 
 ```python
-term_styling.SYMBOLS.update({'held': ('held', '◐', '\uf04c')})
-term_styling.COLORS.update({'held': '33'})
+term_styling.SYMBOLS.update({'archived': ('[arch]', '▣', '\uf187')})
+term_styling.COLORS.update({'archived': '2'})
 ```
 
 ### Tables
 
 `table(rows, headers=None, align='')` returns the rows as aligned columns, one line per row at every tier.
 
-![docs/demo_table.py: on a terminal a table with a bold header, a dim rule, clickable ids, right-aligned points, and colored states; piped through cat the same table as plain space-padded rows with the URLs written out; piped through grep a single matching row](docs/demo-table.webp)
+![docs/demo_table.py: a document listing as a table, first on a plain terminal where folders, owners, and times are text alone and states are colored dots, then with NERD_FONT=1 where every cell gains an icon (folder, file, lock, bug, person, clock, eye for published, crossed eye for unpublished, pause for held) and the columns still line up; then piped through cat as plain rows and through grep as the one unpublished row](docs/demo-table.webp)
 
 ```python
 rows = [

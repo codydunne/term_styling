@@ -70,9 +70,12 @@ ANIMATIONS = {
     'demo-table': [
         [
             ('uv run python demo_table.py', '# a terminal'),
+            ('NERD_FONT=1 uv run python demo_table.py', '# ...with a Nerd Font'),
+        ],
+        [
             ('uv run python demo_table.py | cat', '# piped: plain records'),
-            ("uv run python demo_table.py | grep -F '[!]'", '# ...for grep'),
-        ]
+            ("uv run python demo_table.py | grep -F '[unpub]'", '# ...for grep'),
+        ],
     ],
     'demo-progress': [
         [('uv run python demo_progress.py', '# a line per loop, output above')],

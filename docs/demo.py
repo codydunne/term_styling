@@ -6,8 +6,8 @@ import term_styling
 from term_styling import change, divider, link, mark, paint, progress, table
 
 # A state of the script's own: mark() and paint() pick it up at every tier.
-term_styling.SYMBOLS['held'] = ('[~]', '◐', '\uf04c')
-term_styling.COLORS['held'] = '35'
+term_styling.SYMBOLS['late'] = ('[late]', '◔', '\uf017')
+term_styling.COLORS['late'] = '33'
 
 results = {
     'A1': [mark('ok', 'A1 in sync')],
@@ -17,7 +17,7 @@ results = {
         change('points', 10, 12),
         change('due_at', '2026-09-17 23:59', '2026-09-18 23:59'),
     ],
-    'A4': [mark('held', 'A4 held for review')],
+    'A4': [mark('late', 'A4 submitted late'), mark('held', 'A4 held for review')],
     'A5': [mark('fail', 'A5 rejected: 409 Conflict')],
     'A6': [],
 }

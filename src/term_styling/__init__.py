@@ -41,8 +41,10 @@ _T = TypeVar('_T')
 # A literal, not importlib.metadata, so a vendored copy carries its own version;
 # tests/ checks it against pyproject.toml.
 __version__ = '0.3.0'
-# Every tier-1 character the base SYMBOLS, divider(), and table() print. A stream whose encoding
-# cannot hold them (a Latin-1 locale, PYTHONIOENCODING=ascii) gets tier 0.
+# Tier-1 characters the base SYMBOLS, divider(), and table() print. A stream whose
+# encoding cannot hold them (a Latin-1 locale, PYTHONIOENCODING=ascii) gets tier 0. Not
+# every one: only Unicode encodings hold these eight, and those hold the rest too, which
+# tests/ checks.
 _PROBE = '✓✗⚠→—✎≡─'
 
 
@@ -116,6 +118,24 @@ SYMBOLS = {
     'edit': ('', '✎', '\uf044'),
     # Source-file link. Same: nothing to click at 0.
     'file': ('', '≡', '\uf15c'),
+    # Where a document stands. A word at 0, because there the word is all there is.
+    'published': ('[pub]', '●', '\uf06e'),
+    'unpublished': ('[unpub]', '○', '\uf070'),
+    'held': ('[held]', '◐', '\uf04c'),
+    # Things, not outcomes: what the text beside them is. Unicode has no narrow,
+    # one-color sign for most, so below tier 2 the text stands alone -- these are
+    # what a Nerd Font adds.
+    'folder': ('', '', '\uf07b'),
+    'branch': ('', '', '\uf126'),
+    'time': ('', '', '\uf017'),
+    'date': ('', '', '\uf073'),
+    'user': ('', '', '\uf007'),
+    'lock': ('', '', '\uf023'),
+    'cloud': ('', '', '\uf0c2'),
+    'tag': ('', '', '\uf02b'),
+    'bug': ('', '', '\uf188'),
+    'download': ('', '↓', '\uf019'),
+    'upload': ('', '↑', '\uf093'),
 }
 # ponytail: 16-color SGR only. A handful of semantic states do not need truecolor, and
 # raw 24-bit escapes are only safe where COLORTERM proves them.
@@ -125,6 +145,9 @@ COLORS = {
     'warn': '33',
     'info': '36',
     'new': '32',
+    'published': '32',
+    'unpublished': '2',
+    'held': '35',
     'head': '1',
     'dim': '2',
 }
@@ -162,8 +185,8 @@ def paint(text: object, color: str, tier_: int | None = None) -> str:
 def mark(kind: str, text: object, tier_: int | None = None) -> str:
     """`✓ text` -- this tier's symbol for `kind`, colored when `kind` has a color.
 
-    A state with no symbol at this tier (`edit` and `file` at 0) gives the text alone,
-    not the text after a stray space.
+    A state with no symbol at this tier (`edit` at 0, `folder` below 2) gives the text
+    alone, not the text after a stray space.
     """
     t = TIER if tier_ is None else tier_
     symbol = SYMBOLS[kind][t]
@@ -699,6 +722,10 @@ def selftest() -> int:
     _same(change('due', 'a', 'b', '', 0), 'due: a -> b')
     _same(mark('ok', 'x', 2), '\033[32m\uf00c x\033[0m')  # glyph tier is opt-in
     _same(mark('file', 'x', 0), 'x')  # no tier 0 symbol, no stray space
+    _same(mark('held', 'x', 0), '[held] x')
+    _same(mark('published', 'x', 1), '\033[32m● x\033[0m')
+    _same(mark('folder', 'x', 1), 'x')  # a thing has no sign below tier 2
+    _same(mark('folder', 'x', 2), '\uf07b x')
     # A piped table is records only; styling a cell must not move the columns.
     rows = [('A1', 10), ('A22', None)]
     _same(table(rows, ('id', 'pts'), 'lr', 0), 'id   pts\nA1    10\nA22    -')
