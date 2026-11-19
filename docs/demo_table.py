@@ -29,10 +29,10 @@ def doc(
 rows = [
     doc('folder', 'lectures/', 'cody', '09-18 09:12', None, 'published'),
     doc('file', 'syllabus.md', 'cody', '09-02 14:30', 1840, 'published'),
-    doc('file', 'a1-scatterplots.md', 'kim', '09-17 23:59', 620, 'published'),
-    doc('file', 'a2-color.md', 'kim', '09-18 08:05', 540, 'held'),
+    doc('file', 'a1-scatterplots.md', 'connor', '09-17 23:59', 620, 'published'),
+    doc('file', 'a2-color.md', 'connor', '09-18 08:05', 540, 'held'),
     doc('lock', 'grades.csv', 'cody', '09-18 09:10', None, 'unpublished'),
-    doc('bug', 'a3-networks.md', 'sam', '09-16 11:41', 71, 'broken'),
+    doc('bug', 'a3-networks.md', 'eduardo', '09-16 11:41', 71, 'broken'),
 ]
 
 print(
