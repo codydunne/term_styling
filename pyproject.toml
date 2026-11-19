@@ -1,6 +1,6 @@
 [project]
 name = "term-styling"
-version = "0.2.1"
+version = "0.3.0"
 description = "Terminal output tiers for CLI scripts: plain ASCII when piped, color and OSC 8 links in a terminal, Nerd Font glyphs on request."
 readme = "README.md"
 license = "Apache-2.0"

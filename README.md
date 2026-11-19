@@ -6,11 +6,11 @@ Script output that reads well everywhere it lands: terminals, pipes, and log fil
 - 🎨 **Unicode symbols and 16-color SGR** on a terminal
 - 🔗 **Clickable [OSC 8](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda) hyperlinks** where supported
 - ✨ **[Nerd Font](https://www.nerdfonts.com/) glyphs** when asked for
-- 📊 **Tables and a progress bar** that turn into plain records and silence when piped
+- 📊 **Tables and progress bars** that turn into plain records and silence when piped
 - 🔀 **Per-stream detection**: piped stdout and terminal stderr each style correctly
 - 🐍 **Standard library only**, Python 3.9+
 
-![docs/demo.py with NERD_FONT=1 at tier 2: Nerd Font glyphs, colors, dimmed old values, and underlined links](docs/demo-tier2.webp)
+![docs/demo.py with NERD_FONT=1 at tier 2: a progress line under the results as they print, then Nerd Font glyphs, colors, dimmed old values, underlined links, and a summary table](docs/demo-tier2.webp)
 
 See the same script for [the other displayed tiers 0 and 1](#tiers).
 
@@ -24,8 +24,8 @@ The package is `term-styling` on PyPI and imports as `term_styling`.
 Minor versions can break compatibility before 1.0 (see [CHANGELOG.md](CHANGELOG.md)), so cap the minor version:
 
 ```bash
-uv add 'term-styling>=0.2,<0.3'      # in a uv project
-pip install 'term-styling>=0.2,<0.3' # anywhere else
+uv add 'term-styling>=0.3,<0.4'      # in a uv project
+pip install 'term-styling>=0.3,<0.4' # anywhere else
 ```
 
 In a single-file script with [PEP 723](https://peps.python.org/pep-0723/) inline metadata:
@@ -33,14 +33,14 @@ In a single-file script with [PEP 723](https://peps.python.org/pep-0723/) inline
 ```python
 # /// script
 # requires-python = ">=3.9"
-# dependencies = ["term-styling>=0.2,<0.3"]
+# dependencies = ["term-styling>=0.3,<0.4"]
 # ///
 ```
 
 ### From the repository
 
 For changes on `main` that are not released yet, depend on the git repository.
-Pin a release tag (`@v0.2.0`) or a full commit hash so later pushes cannot change what you get:
+Pin a release tag (`@v0.3.0`) or a full commit hash so later pushes cannot change what you get:
 
 ```bash
 uv add git+https://github.com/codydunne/term_style --rev <tag or full commit hash>
@@ -59,7 +59,7 @@ It has no imports outside the standard library, and `uv run term_styling.py` run
 
 | tier | when | output |
 |---|---|---|
-| 0 | stream is not a TTY; `NO_COLOR` is non-empty; `CI` is non-empty and not `false`/`0` (any case); `TERM=dumb`; or the stream's encoding cannot print every one of `✓✗⚠→—✎≡─━` (a Latin-1 locale, `PYTHONIOENCODING=ascii`) | ASCII, no escapes; links print as `label  url` |
+| 0 | stream is not a TTY; `NO_COLOR` is non-empty; `CI` is non-empty and not `false`/`0` (any case); `TERM=dumb`; or the stream's encoding cannot print every one of `✓✗⚠→—✎≡─` (a Latin-1 locale, `PYTHONIOENCODING=ascii`) | ASCII, no escapes; links print as `label  url` |
 | 1 | a terminal | unicode symbols, color, OSC 8 links |
 | 2 | a terminal and `NERD_FONT=1` | as 1, with Font Awesome glyphs from a Nerd Font |
 
@@ -67,14 +67,14 @@ It has no imports outside the standard library, and `uv run term_styling.py` run
 
 With `NO_COLOR=1` and then with stdout redirected to a log while stderr stays on the terminal:
 
-![docs/demo.py at tier 0: with NO_COLOR=1 both streams are plain ASCII; redirected to sync.log, stderr stays styled and the log holds ASCII](docs/demo-tier0.webp)
+![docs/demo.py at tier 0: with NO_COLOR=1 both streams are plain ASCII; redirected to sync.log, the progress line and stderr stay styled and the log holds ASCII, the table as plain rows](docs/demo-tier0.webp)
 
 
 ### Tier 1 
 
 In a terminal without a Nerd Font:
 
-![docs/demo.py in a terminal at tier 1: unicode symbols in place of the Nerd Font glyphs](docs/demo-tier1.webp)
+![docs/demo.py in a terminal at tier 1: unicode symbols in place of the Nerd Font glyphs, with the same progress line and table](docs/demo-tier1.webp)
 
 ### Tier 2: Enabling Top-Tier Formatting
 
@@ -168,7 +168,8 @@ A3     -  held
 
 On a terminal the header is bold with a dim rule under it.
 `align` takes one `l` or `r` per column and is left where it runs out; any other character raises `ValueError` at every tier.
-Cells may be styled with `mark()`, `paint()`, or `link()`: widths are measured without the escapes, with East Asian wide characters counted as two columns.
+Cells may be styled with `mark()`, `paint()`, or `link()`: widths are measured without the escapes.
+East Asian wide characters count as two columns, and so does an emoji built from several codepoints (a ZWJ family, a flag, a skin tone, a keycap).
 A `None` cell prints as the `none` symbol (`-`, or `—` on a terminal), and a newline inside a cell becomes a space.
 Cells are never wrapped or truncated, because a wrapped row is no longer one record.
 
@@ -179,22 +180,33 @@ Cells are never wrapped or truncated, because a wrapped row is no longer one rec
 ```python
 for path in term_styling.progress(paths, 'uploading'):
     upload(path)
+    print(mark('ok', path))  # lands above the line
 print(mark('ok', f'{len(paths)} uploaded'))
 ```
 
 ```text
-uploading ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12/40
+uploading ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12/40 eta 0:28
 ```
 
-At tier 0 (stderr piped, `CI`, `NO_COLOR`) it prints nothing at all, so logs never collect redraws.
+At tier 0 (stderr piped, `CI`, `NO_COLOR`) it prints nothing at all and wraps nothing, so logs never collect redraws.
 The line is erased when the loop ends, breaks, or raises; print the outcome yourself.
-`total` defaults to `len(items)`; an iterator without a length shows a running count and no bar.
-Redraws are capped at ten a second.
+`total` defaults to `len(items)`; an iterator without a length shows a running count and the time elapsed, with no bar.
+The estimate is the mean pace so far, and redraws are capped at ten a second.
+
+While a loop runs, `sys.stderr` is replaced by a thin stand-in, and `sys.stdout` too when it is a terminal, so anything printed inside the loop appears above the line and both streams are restored afterwards.
+A piped `sys.stdout` is left untouched.
+Loops may nest or run in threads: each gets its own line, in the order they started.
+
+```python
+for course in term_styling.progress(courses, 'courses'):
+    for item in term_styling.progress(course.items, course.name):
+        sync(item)
+```
 
 ### When to use rich instead
 
 `table` and `progress` are deliberately the small cases.
-Reach for [rich](https://github.com/Textualize/rich) when you need wrapped or truncated cells, borders, several bars at once, an ETA, or log lines printed above a live bar (here, anything printed inside the loop lands on the bar's line).
+Reach for [rich](https://github.com/Textualize/rich) when you need wrapped or truncated cells, borders, spinners, transfer speeds, or a bar that keeps ticking while one slow item runs (here a line redraws only when an item finishes or something prints).
 The two combine: build a rich `Console` only when `term_styling.TIER` is non-zero, and keep the plain path here.
 
 ### Shared state
@@ -271,9 +283,10 @@ uv run --isolated --no-project --with dist/*.whl python -m term_styling
 - Windows consoles that do not enable virtual-terminal processing (legacy `conhost.exe` without it turned on) print the escapes literally; Windows Terminal and VS Code's terminal are fine.
   `NO_COLOR=1` is the workaround.
   Not handled in code: turning VT processing on takes Win32 console calls, and nothing here tests them yet.
-- Column widths use the standard library's Unicode tables: wide and combining characters are measured, but a multi-codepoint emoji (a flag, a ZWJ sequence) is not measured as one glyph and can misalign a table row.
+- Column widths follow the Unicode rules, but terminals disagree about emoji: some draw a ZWJ sequence as separate glyphs or a U+FE0F symbol one column wide, and a table row holding one can be off by a column there.
+- Writes that bypass `sys.stdout`/`sys.stderr` during `progress()` (`sys.stdout.buffer`, `os.write`, a subprocess sharing the terminal) are not moved above the line, and a label wider than the terminal smears.
 - Colors are the 16-color SGR set only; there is no truecolor or 256-color path.
-- The encoding probe covers the base symbols. A caller's own symbols outside that set (`●`, say) are not checked, though in practice any encoding that prints all of the base set is a Unicode one.
+- The encoding probe covers the base symbols (the progress bar's `━` is outside it and falls back to `─`). A caller's own symbols outside that set (`●`, say) are not checked, though in practice any encoding that prints all of the base set is a Unicode one.
 
 ## License
 

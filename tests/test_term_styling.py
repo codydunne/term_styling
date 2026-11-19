@@ -3,9 +3,11 @@ from __future__ import annotations
 import importlib.metadata
 import io
 import os
+import re
 import shutil
 import subprocess
 import sys
+import threading
 
 import pytest
 
@@ -280,55 +282,216 @@ def test_table_bad_align_fails_at_every_tier() -> None:
             term_styling.table([('a',)], align='c', tier_=t)
 
 
+class Clock:
+    """time.monotonic under the test's control."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
+    monkeypatch.setenv('COLUMNS', '80')
+    fake = Clock()
+    monkeypatch.setattr(term_styling.time, 'monotonic', fake)
+    return fake
+
+
+DIM = '\033[2m{}\033[0m'
+ERASE = '\r\033[J'
+
+
+@pytest.mark.parametrize(
+    'glyph',
+    [
+        '👨‍👩‍👧',  # ZWJ family
+        '🏳️‍🌈',  # ZWJ after a variation selector
+        '🇺🇸',  # two regional indicators
+        '👍🏽',  # skin tone modifier
+        '1️⃣',  # keycap
+        '⚠️',  # narrow symbol with emoji presentation
+        '🏴\U000e0067\U000e0062\U000e0073\U000e0063\U000e0074\U000e007f',  # tag flag
+        '日',
+    ],
+)
+def test_width_counts_one_glyph_as_two_columns(glyph: str) -> None:
+    assert term_styling._width(glyph) == 2
+    assert term_styling.table([(glyph, 'x'), ('ab', 'x')], tier_=0) == (
+        f'{glyph}  x\nab  x'
+    )
+
+
+def test_width_of_plain_and_narrow_text() -> None:
+    assert term_styling._width('⚠ áb') == 4
+    assert term_styling._width('‍') == 0  # a joiner with nothing to join
+
+
 def test_progress_is_silent_when_plain(
     plain: None, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert list(term_styling.progress(range(3), 'sync')) == [0, 1, 2]
+    stderr = sys.stderr
+    for _ in term_styling.progress(range(3), 'sync'):
+        assert sys.stderr is stderr  # nothing is wrapped either
     captured = capsys.readouterr()
     assert (captured.out, captured.err) == ('', '')
 
 
 def test_progress_draws_on_stderr_and_erases(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    clock: Clock, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setenv('COLUMNS', '80')
-    monkeypatch.setattr(term_styling.time, 'monotonic', iter(range(10)).__next__)
-    assert list(term_styling.progress(['a', 'b'], 'sync', tier_=1)) == ['a', 'b']
+    seen = []
+    for item in term_styling.progress(['a', 'b'], 'sync', tier_=1):
+        seen.append(item)
+        clock.now += 2
+    assert seen == ['a', 'b']
     captured = capsys.readouterr()
     assert captured.out == ''
-    dim = '\033[2m{}\033[0m'
     assert captured.err == (
-        '\rsync ' + dim.format('━' * 30) + ' 0/2\033[K'
-        '\rsync ' + '━' * 15 + dim.format('━' * 15) + ' 1/2\033[K'
-        '\r\033[K'
+        '\rsync ' + DIM.format('━' * 30) + ' 0/2\033[K'
+        '\rsync ' + '━' * 15 + DIM.format('━' * 15) + ' 1/2 eta 0:02\033[K'
+        '\rsync ' + '━' * 30 + ' 2/2\033[K' + ERASE
     )
 
 
 def test_progress_throttles_redraws(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    clock: Clock, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(term_styling.time, 'monotonic', lambda: 5.0)
     assert sum(term_styling.progress(range(1000), tier_=1)) == 499500
-    assert capsys.readouterr().err.count('\r') == 2  # one draw, one erase
+    assert capsys.readouterr().err.count('\r') == 2  # the first draw and the erase
 
 
-def test_progress_erases_on_break_and_error(capsys: pytest.CaptureFixture[str]) -> None:
+def test_progress_without_a_length_counts_and_times(
+    clock: Clock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for _ in term_styling.progress(iter('ab'), 'scan', tier_=1):
+        clock.now += 61
+    assert capsys.readouterr().err == (
+        '\rscan 0 0:00\033[K\rscan 1 1:01\033[K\rscan 2 2:02\033[K' + ERASE
+    )
+
+
+def test_progress_erases_and_unwraps_on_break_and_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    stderr = sys.stderr
     for item in term_styling.progress(range(5), tier_=1):
+        assert sys.stderr is not stderr
         if item == 1:
             break
-    assert capsys.readouterr().err.endswith('\r\033[K')
+    assert sys.stderr is stderr
+    assert capsys.readouterr().err.endswith(ERASE)
     with pytest.raises(ZeroDivisionError):
         for item in term_styling.progress(range(5), tier_=1):
             1 / item
-    assert capsys.readouterr().err.endswith('\r\033[K')
+    assert sys.stderr is stderr
+    assert capsys.readouterr().err.endswith(ERASE)
+
+
+def test_text_printed_in_the_loop_lands_above_the_bar(
+    plain: None, clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # One terminal behind both streams, as on a real screen.
+    screen = FakeTTY()
+    monkeypatch.setattr(sys, 'stdout', screen)
+    monkeypatch.setattr(sys, 'stderr', screen)
+    for item in term_styling.progress(['a', 'b'], tier_=1):
+        if item == 'a':
+            print('to stdout')
+            term_styling.warn('to stderr')
+            print('half', end='')  # no bar may cut an unfinished line
+            print(' line')
+    assert sys.stdout is screen
+    assert sys.stderr is screen
+    bar0 = '\r' + DIM.format('━' * 30) + ' 0/2\033[K'
+    assert screen.getvalue() == (
+        bar0
+        + ERASE + 'to stdout\n' + bar0
+        + ERASE + '[!] to stderr\n' + bar0
+        + ERASE + 'half line\n' + bar0
+        + ERASE
+    )  # fmt: skip
+
+
+def test_piped_stdout_is_not_wrapped(capsys: pytest.CaptureFixture[str]) -> None:
+    stdout = sys.stdout
+    for _ in term_styling.progress(range(2), tier_=1):
+        assert sys.stdout is stdout
+        print('data')
+    assert capsys.readouterr().out == 'data\ndata\n'
+
+
+def test_nested_progress_draws_a_line_each(
+    clock: Clock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for _ in term_styling.progress(range(1), 'outer', tier_=1):
+        for _ in term_styling.progress(range(1), 'inner', tier_=1):
+            clock.now += 1
+        clock.now += 1
+    outer0 = 'outer ' + DIM.format('━' * 30) + ' 0/1\033[K'
+    inner0 = 'inner ' + DIM.format('━' * 30) + ' 0/1\033[K'
+    inner1 = 'inner ' + '━' * 30 + ' 1/1\033[K'
+    outer1 = 'outer ' + '━' * 30 + ' 1/1\033[K'
+    up = '\r\033[1A'
+    assert capsys.readouterr().err == (
+        '\r' + outer0
+        + '\r' + outer0 + '\n' + inner0  # the inner loop starts: a second line
+        + up + outer0 + '\n' + inner1
+        + up + '\033[J' + '\r' + outer0  # the inner loop ends: back to one
+        + '\r' + outer1
+        + ERASE
+    )  # fmt: skip
+
+
+def test_progress_in_threads_keeps_every_line_whole(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def work(name: str) -> None:
+        for item in term_styling.progress(range(20), name, tier_=1):
+            print(f'{name} {item}', file=sys.stderr)
+
+    stderr = sys.stderr
+    threads = [threading.Thread(target=work, args=(n,)) for n in ('a', 'b', 'c')]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert sys.stderr is stderr
+    assert not term_styling._LIVE.bars
+    text = re.sub(r'\r|\033\[\d*[AJK]|\033\[\d+m', '\n', capsys.readouterr().err)
+    printed = [line for line in text.split('\n') if re.fullmatch(r'[abc] \d+', line)]
+    assert sorted(printed) == sorted(f'{n} {i}' for n in 'abc' for i in range(20))
+
+
+def test_bar_falls_back_when_the_stream_lacks_the_heavy_rule(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # cp437 has the light rule (which _PROBE requires) but not the heavy one.
+    screen = term_styling._TTY('cp437')
+    monkeypatch.setattr(sys, 'stderr', screen)
+    for _ in term_styling.progress(range(1), tier_=1):
+        pass
+    assert '─' * 30 in screen.getvalue()
+    assert '━' not in screen.getvalue()
+
+
+def test_probe_is_unchanged_from_0_2() -> None:
+    # A new symbol must not take tier 1 away from a stream that had it.
+    assert term_styling._PROBE == '✓✗⚠→—✎≡─'
 
 
 def test_bar_without_total_or_room() -> None:
-    assert term_styling._bar(7, None, 'scan', 1, 80) == 'scan 7'
-    assert term_styling._bar(0, 0, '', 1, 80) == '0'  # an empty run does not divide
-    assert term_styling._bar(1, 2, 'sync', 1, 12) == 'sync 1/2'  # no room: no bar
-    assert term_styling._bar(9, 2, '', 1, 80) == '━' * 30 + ' 9/2'  # a wrong total
-    assert term_styling._width(term_styling._bar(1, 2, 'sync', 1, 20)) == 19
+    assert term_styling._bar(7, None, 'scan', 1, 80, 65) == 'scan 7 1:05'
+    # An empty run does not divide.
+    assert term_styling._bar(0, 0, '', 1, 80) == '0 0:00'
+    # No room: no bar.
+    assert term_styling._bar(1, 2, 'sync', 1, 12, 4) == 'sync 1/2 eta 0:04'
+    # A wrong total neither overflows the bar nor estimates.
+    assert term_styling._bar(9, 2, '', 1, 80) == '━' * 30 + ' 9/2'
+    assert term_styling._bar(0, 2, '', 1, 80, 9) == DIM.format('━' * 30) + ' 0/2'
+    assert term_styling._width(term_styling._bar(1, 2, 'sync', 1, 30)) == 29
 
 
 def test_skip_records_first_line(

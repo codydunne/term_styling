@@ -4,8 +4,9 @@
 # ///
 """Regenerate docs/demo-tier{0,1,2}.webp: `uv run docs/make_demo.py` (Linux/macOS, needs a pty).
 
-Runs demo.py under a real pseudo-terminal once per command and draws the captured output.
-Only the SGR codes and OSC 8 links term_styling emits are parsed. The NERD_FONT scene needs
+Runs demo.py under a real pseudo-terminal once per command and replays the captured output
+with its timing, so the progress line animates. Only what term_styling emits is parsed: SGR
+codes, OSC 8 links, and the carriage return, cursor-up, and erase codes of progress(). The NERD_FONT scene needs
 a Nerd Font: JetBrainsMono Nerd Font Mono is found via fc-list or, under WSL, in the
 Windows font folders (where pwsh's Install-NerdFont puts it), or set DEMO_FONT and
 DEMO_FONT_BOLD to another's files. Characters that font lacks are drawn from DejaVu Sans
@@ -19,13 +20,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from fontTools.ttLib import TTFont
 from PIL import Image, ImageDraw, ImageFont
 
 HERE = Path(__file__).parent
-COLS, ROWS, FONT_SIZE, PAD = 72, 19, 30, 30
+COLS, ROWS, FONT_SIZE, PAD = 72, 26, 30, 30
 DEJAVU = '/usr/share/fonts/truetype/dejavu/DejaVuSansMono'
 FAMILY = 'JetBrainsMono Nerd Font Mono'
 BG, FG = (30, 30, 36), (220, 220, 220)
@@ -37,7 +39,12 @@ SGR = {
     '36': (90, 200, 220),
 }
 PROMPT, COMMENT = (130, 170, 255), (120, 120, 135)
-TOKEN = re.compile(r'\x1b\[(\d+)m|\x1b\]8;;([^\x1b]*)\x1b\\|\r?\n|[^\x1b\r\n]')
+TOKEN = re.compile(
+    r'\x1b\[(\d+)m|\x1b\]8;;([^\x1b]*)\x1b\\|\x1b\[(\d*)([AJK])|\r?\n|\r|[^\x1b\r\n]'
+)
+# Output arriving within this many seconds is one frame: a burst of print() calls is not
+# worth a frame each, and a redraw is never split from its erase.
+BURST = 0.05
 # One animation per tier, written to demo-tier<N>.webp. Each scene starts on a cleared
 # screen: (typed command, comment shown after it) pairs. The log file keeps the redirect
 # scene deterministic: `| cat` would race cat against stderr.
@@ -73,19 +80,23 @@ def find_font(style: str) -> str:
     return next(iter([*out.splitlines(), *map(str, found)]), '')
 
 
-def capture(cmd: str, cwd: str) -> str:
-    """`cmd`'s stdout+stderr as a terminal sees them, with term_styling imported from src/."""
+def capture(cmd: str, cwd: str) -> list:
+    """`cmd`'s stdout+stderr as a terminal sees them: (seconds from start, text) bursts.
+
+    term_styling is imported from src/.
+    """
     master, slave = pty.openpty()
     env = {**os.environ, 'COLUMNS': str(COLS), 'PYTHONPATH': str(HERE.parent / 'src')}
     for k in ('NO_COLOR', 'CI', 'NERD_FONT'):
         env.pop(k, None)
     env['TERM'] = 'xterm-256color'
     cmd = cmd.replace('python', sys.executable, 1)
+    start = time.monotonic()
     proc = subprocess.Popen(
         cmd, shell=True, cwd=cwd, env=env, stdout=slave, stderr=slave
     )
     os.close(slave)
-    out = b''
+    bursts: list = []  # [first byte's time, last byte's time, bytes]
     while True:
         try:
             chunk = os.read(master, 4096)
@@ -93,39 +104,62 @@ def capture(cmd: str, cwd: str) -> str:
             break
         if not chunk:
             break
-        out += chunk
+        now = time.monotonic() - start
+        if bursts and now - bursts[-1][1] < BURST:
+            bursts[-1][1] = now
+            bursts[-1][2] += chunk
+        else:
+            bursts.append([now, now, chunk])
     proc.wait()
     os.close(master)
-    return out.decode()
+    return [(at, data.decode()) for at, _, data in bursts]
 
 
-def cells(text: str) -> list:
-    """Lines of (char, color, dim, bold, underline) cells."""
-    style = {'color': FG, 'dim': False, 'bold': False, 'link': False}
-    lines, line = [], []
-    for m in TOKEN.finditer(text):
-        code, url, tok = m.group(1), m.group(2), m.group(0)
-        if code is not None:
-            if code == '0':
-                style.update(color=FG, dim=False, bold=False)
-            elif code == '1':
-                style['bold'] = True
-            elif code == '2':
-                style['dim'] = True
+class Screen:
+    """Lines of (char, color, dim, bold, underline) cells, and a cursor writing them."""
+
+    def __init__(self) -> None:
+        self.lines: list = [[]]
+        self.row = self.col = 0
+        self.style = {'color': FG, 'dim': False, 'bold': False, 'link': False}
+
+    def feed(self, text: str) -> None:
+        style = self.style
+        for m in TOKEN.finditer(text):
+            code, url, count, move, tok = m.group(1, 2, 3, 4, 0)
+            line = self.lines[self.row]
+            if code is not None:
+                if code == '0':
+                    style.update(color=FG, dim=False, bold=False)
+                elif code == '1':
+                    style['bold'] = True
+                elif code == '2':
+                    style['dim'] = True
+                else:
+                    style['color'] = SGR[code]
+            elif url is not None:
+                style['link'] = bool(url)
+            elif move == 'A':
+                self.row = max(0, self.row - int(count or 1))
+            elif move:  # K erases to the end of the line, J the lines below as well
+                del line[self.col :]
+                if move == 'J':
+                    del self.lines[self.row + 1 :]
+            elif tok == '\r':
+                self.col = 0
+            elif tok.endswith('\n'):
+                self.row, self.col = self.row + 1, 0
+                if self.row == len(self.lines):
+                    self.lines.append([])
             else:
-                style['color'] = SGR[code]
-        elif url is not None:
-            style['link'] = bool(url)
-        elif tok.endswith('\n'):
-            lines.append(line)
-            line = []
-        else:
-            line.append(
-                (tok, style['color'], style['dim'], style['bold'], style['link'])
-            )
-    if line:
-        lines.append(line)
-    return lines
+                cell = (tok, style['color'], style['dim'], style['bold'], style['link'])
+                line[self.col : self.col + 1] = [cell]
+                self.col += 1
+
+    def type(self, line: list) -> None:
+        """A whole line at the cursor, as if entered at a prompt."""
+        self.lines[self.row :] = [line, []]
+        self.row, self.col = self.row + 1, 0
 
 
 def main() -> int:
@@ -179,7 +213,7 @@ def render(scenes: list, draw, cwd: str) -> tuple:
     """Frames and their durations in ms: each command typed out, then its output."""
     frames, durations = [], []
     for scene in scenes:
-        screen: list = []
+        screen = Screen()
         for cmd, comment in scene:
             prompt = [
                 ('$', PROMPT, False, True, False),
@@ -188,13 +222,23 @@ def render(scenes: list, draw, cwd: str) -> tuple:
             typed = [(c, FG, False, False, False) for c in cmd]
             typed += [(c, COMMENT, False, False, False) for c in '  ' + comment]
             for i in range(0, len(typed) + 1, 2):  # two characters a frame
-                frames.append(draw([*screen, prompt + typed[:i]]))
+                frames.append(draw([*screen.lines[: screen.row], prompt + typed[:i]]))
                 durations.append(500 if i == 0 else 40)
-            screen += [prompt + typed, *cells(capture(cmd, cwd))]
-            assert len(screen) <= ROWS, f'{cmd}: {len(screen)} lines > {ROWS} rows'
-            assert all(len(r) <= COLS for r in screen), f'{cmd}: a line > {COLS} cols'
-            frames.append(draw(screen))
-            durations.append(4500 if cmd == scene[-1][0] else 1500)
+            screen.type(prompt + typed)
+            bursts = capture(cmd, cwd)
+            for i, (at, text) in enumerate(bursts):
+                screen.feed(text)
+                rows = len(screen.lines) - (not screen.lines[-1])
+                assert rows <= ROWS, f'{cmd}: {rows} lines > {ROWS} rows'
+                assert all(len(r) <= COLS for r in screen.lines), (
+                    f'{cmd}: a line > {COLS} cols'
+                )
+                frames.append(draw(screen.lines))
+                # Each burst stays up until the next one arrived; the last, to be read.
+                if i + 1 < len(bursts):
+                    durations.append(max(20, round((bursts[i + 1][0] - at) * 1000)))
+                else:
+                    durations.append(4500 if cmd == scene[-1][0] else 1500)
     return frames, durations
 
 
