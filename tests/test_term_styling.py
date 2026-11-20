@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import unittest
 from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
@@ -1026,7 +1027,8 @@ def test_real_windows_console_reads_escapes() -> None:
     try:
         console = open('CONOUT$', 'w', encoding='utf-8')
     except OSError:
-        pytest.skip('this process has no console')  # ty: ignore[too-many-positional-arguments]
+        # Not pytest.skip(): ty resolves its signature differently per Python version.
+        raise unittest.SkipTest('this process has no console') from None
     with console:
         assert term_styling._vt(console)
         mode = wintypes.DWORD()
