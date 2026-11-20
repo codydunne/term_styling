@@ -40,7 +40,7 @@ _T = TypeVar('_T')
 
 # A literal, not importlib.metadata, so a vendored copy carries its own version;
 # tests/ checks it against pyproject.toml.
-__version__ = '0.3.0'
+__version__ = '0.3.1'
 # Tier-1 characters the base SYMBOLS, divider(), and table() print. A stream whose
 # encoding cannot hold them (a Latin-1 locale, PYTHONIOENCODING=ascii) gets tier 0. Not
 # every one: only Unicode encodings hold these eight, and those hold the rest too, which
@@ -77,6 +77,40 @@ def _tolerate(stream: object) -> None:
         pass
 
 
+# ENABLE_VIRTUAL_TERMINAL_PROCESSING: the console output mode that makes a Windows
+# console read escapes instead of printing them.
+_VT = 0x0004
+
+
+def _vt(stream: object) -> bool:
+    """Whether the terminal behind `stream` reads escapes, asking a Windows console to.
+
+    Everywhere else a terminal does. A Windows console does only in that mode: Windows
+    Terminal is always in it, and a legacy conhost window is put into it here, as the
+    Python 3.13 REPL and rich do, and left in it. False only for a console that refuses
+    (before Windows 10 1511); anything that cannot be asked keeps the terminal's word.
+    """
+    if sys.platform != 'win32':
+        return True
+    try:
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        kernel32 = ctypes.windll.kernel32
+        # A HANDLE, not the default C int: a 64-bit handle must not be truncated.
+        handle = wintypes.HANDLE(msvcrt.get_osfhandle(stream.fileno()))
+        mode = wintypes.DWORD()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return True  # a terminal, but no console: nothing to switch on
+        if mode.value & _VT:
+            return True
+        return bool(kernel32.SetConsoleMode(handle, mode.value | _VT))
+    except (AttributeError, ImportError, NotImplementedError, OSError, ValueError):
+        # No fileno (an in-memory stream), no console API: not a console to ask.
+        return True
+
+
 def tier(stream: TextIO) -> int:
     """How much this stream can render: 0 plain ASCII, 1 unicode + color, 2 glyphs.
 
@@ -86,17 +120,20 @@ def tier(stream: TextIO) -> int:
     """
     try:
         tty = stream.isatty()
-    except (AttributeError, ValueError):
+    except (AttributeError, NotImplementedError, OSError, ValueError):
         return 0
     if (
         not tty
+        # IDLE's shell says it is a terminal and prints every escape literally.
+        or type(stream).__module__.startswith('idlelib')
         or os.environ.get('TERM') == 'dumb'
         or os.environ.get('NO_COLOR')
         # Some tools export CI=false to mean "not CI"; only those two spellings are off.
         or os.environ.get('CI', '').lower() not in ('', '0', 'false')
     ):
         return 0
-    if not _encodes(stream):
+    # Last, so a console is only switched to escapes when they are about to be sent.
+    if not _encodes(stream) or not _vt(stream):
         return 0
     return 2 if os.environ.get('NERD_FONT') == '1' else 1
 
@@ -165,16 +202,23 @@ BARS = {
 SKIPPED: list[str] = []
 
 
+def _percent(match: re.Match[str]) -> str:
+    return ''.join(f'%{byte:02X}' for byte in match[0].encode('utf-8'))
+
+
 def link(url: str, label: str | None = None, tier_: int | None = None) -> str:
     """`label` as a clickable OSC 8 hyperlink, degrading to plain text + the URL.
 
     A file:// target needs `wslpath -w` first under WSL, since the terminal opens links on
-    the Windows side.
+    the Windows side. A control character in `url` is percent-encoded inside the escape:
+    raw, it would end the escape early and spill the rest of the URL onto the screen.
     """
     t = TIER if tier_ is None else tier_
     if t:
-        return f'\033]8;;{url}\033\\{label or url}\033]8;;\033\\'
-    return f'{label}  {url}' if label else url
+        target = _CONTROL.sub(_percent, url)
+        return f'\033]8;;{target}\033\\{label or url}\033]8;;\033\\'
+    # A label that is the URL says it once.
+    return f'{label}  {url}' if label and label != url else url
 
 
 def paint(text: object, color: str, tier_: int | None = None) -> str:
@@ -227,12 +271,18 @@ def divider(tier_: int | None = None) -> str:
     return paint(('─' if t else '-') * width, 'dim', t)
 
 
-# What paint() and link() wrap around text: zero columns wide on screen.
+# Categories that fill no column: combining marks and format characters.
 _NO_WIDTH = ('Mn', 'Me', 'Cf')
+# ...but not these format characters, which terminals (and wcwidth) give a column:
+# the soft hyphen and the Arabic, Syriac, and Kaithi signs that sit before a number.
+_FORMAT_WIDE = frozenset(
+    map(chr, (0xAD, *range(0x600, 0x606), 0x6DD, 0x70F, 0x890, 0x891, 0x8E2))
+) | {'\U000110bd', '\U000110cd'}
 # Escapes fill no columns: any CSI sequence, any OSC or other control string (DCS,
-# SOS, PM, APC, whose text a terminal hides), and the two- and three-byte escapes (`tput sgr0` sends ESC ( B), so a cell another library styled
-# measures right too. A control character ends an OSC string early on a terminal,
-# so one inside is no part of the escape here either.
+# SOS, PM, APC, whose text a terminal hides), and the two- and three-byte escapes
+# (`tput sgr0` sends ESC ( B), so a cell another library styled measures right too.
+# A control character ends an OSC string early on a terminal, so one inside is no
+# part of the escape here either.
 _ESCAPE = re.compile(
     r'\033\[[0-?]*[ -/]*[@-~]'
     r'|\033\][^\x00-\x1f\x7f-\x9f]*(?:\033\\|\a)'
@@ -299,7 +349,7 @@ def _width(text: str) -> int:
             0x1F3FB <= code <= 0x1F3FF
             or 0x1160 <= code <= 0x11FF
             or 0xD7B0 <= code <= 0xD7FF
-            or unicodedata.category(ch) in _NO_WIDTH
+            or (unicodedata.category(ch) in _NO_WIDTH and ch not in _FORMAT_WIDE)
         ):
             continue
         else:
@@ -359,7 +409,8 @@ def table(
 
     lines = [line(head, 'head')] if head else []
     if head and t:
-        lines.append(paint('  '.join('─' * w for w in widths), 'dim', t))
+        # rstrip: a last column of empty cells would leave the rule ending in spaces.
+        lines.append(paint('  '.join('─' * w for w in widths).rstrip(), 'dim', t))
     lines += [line(row) for row in body]
     return '\n'.join(lines)
 
@@ -368,6 +419,22 @@ def _clock(seconds: float) -> str:
     minutes, secs = divmod(int(seconds), 60)
     hours, minutes = divmod(minutes, 60)
     return f'{hours}:{minutes:02}:{secs:02}' if hours else f'{minutes}:{secs:02}'
+
+
+def _clip(text: str, columns: int) -> str:
+    """`text` cut to `columns` columns at most, ending in `…` where it was cut.
+
+    A progress line wider than the terminal wraps, and a wrapped line cannot be redrawn
+    in place: every redraw would leave a copy behind. Escapes are dropped from a text
+    that is cut, since half of one would style or swallow the rest of the line.
+    """
+    if _width(text) <= columns:
+        return text
+    text = _ESCAPE.sub('', text)
+    end = len(text)
+    while end and _width(text[:end] + '…') > columns:
+        end -= 1
+    return text[:end].rstrip() + '…' if columns > 0 else ''
 
 
 def _checked(bar: Sequence[str]) -> tuple[str, ...]:
@@ -416,20 +483,20 @@ def _bar(
 ) -> str:
     """One progress line: `label ━━━━━━ 3/10 eta 0:07`, or `label 3 0:02` uncounted.
 
-    The bar is dropped when it cannot fit, and before it the estimate. The estimate is
-    the mean pace so far, shown once an item has finished.
+    The bar is dropped when it cannot fit, and before it the estimate; a label that
+    still does not fit is cut short. The estimate is the mean pace so far, shown once
+    an item has finished.
     """
+    tail = f'{done}/{total}' if total else f'{done} {_clock(elapsed)}'
+    # The count is kept whole, and one column spare (see below).
+    label = _clip(label, columns - 2 - len(tail))
     parts = [label] if label else []
     if total:
-        tail = f'{done}/{total}'
         if 0 < done < total:
             eta = f'{tail} eta {_clock(elapsed * (total - done) / done)}'
             # A line that wraps cannot be redrawn in place: the count matters more.
             if _width(' '.join([*parts, eta])) < columns:
                 tail = eta
-    else:
-        tail = f'{done} {_clock(elapsed)}'
-    if total:
         # One column spare: a line that reaches the last column wraps on some terminals,
         # and then \r no longer returns to its start.
         size = min(30, columns - 2 - _width(' '.join([*parts, tail])))
@@ -467,17 +534,18 @@ class _Above:
         with _LIVE.lock:
             # No bars: a stand-in something kept a reference to. Busy: the bars' own
             # write, coming back through a wrapper someone put around this stand-in.
-            if not _LIVE.bars or _LIVE.busy:
+            # Empty: a probe (click sends one to learn the stream's type), nothing
+            # to move the bars for.
+            if not _LIVE.bars or _LIVE.busy or not text:
                 return self._stream.write(text)
             _LIVE.erase()
             written = self._stream.write(text)
             # stdout and stderr share the screen, so neither may sit in a buffer while
             # the other draws.
             self._stream.flush()
-            if text:
-                # print() writes its text and its newline separately; the bars wait for
-                # the line to end rather than cut it in two.
-                _LIVE.midline = not text.endswith('\n')
+            # print() writes its text and its newline separately; the bars wait for
+            # the line to end rather than cut it in two.
+            _LIVE.midline = not text.endswith('\n')
             _LIVE.draw()
             return written
 
@@ -504,7 +572,7 @@ def _columns(stream: object) -> int:
     if columns <= 0:
         try:
             columns = os.get_terminal_size(stream.fileno()).columns  # ty: ignore[unresolved-attribute]
-        except (AttributeError, OSError, ValueError):
+        except (AttributeError, NotImplementedError, OSError, ValueError):
             columns = 0
     return columns if columns > 0 else 80
 
@@ -658,8 +726,7 @@ def progress(
     Wrap the call in contextlib.closing() where the cleanup has to be certain.
 
     ponytail: no refresh thread, so the line redraws when an item finishes or a printed
-    line ends (a loop printing dots with end='' shows no bar), and a label wider than
-    the terminal wraps and smears. Use rich for those.
+    line ends (a loop printing dots with end='' shows no bar). Use rich for those.
     """
     t = ERR_TIER if tier_ is None else tier_
     # Checked at every tier, like a color: a typo fails in a piped test run too.
@@ -767,6 +834,9 @@ def selftest() -> int:
     _same(change('due', 'a', 'b', '', 1), 'due: \033[2ma\033[0m → b')
     _same(link('http://x', 'A1', 0), 'A1  http://x')
     _same(link('http://x', tier_=0), 'http://x')
+    _same(link('http://x', 'http://x', 0), 'http://x')
+    # A control character cannot end the link escape early.
+    _same(link('http://x/\033\\a\n', 'A1', 1), link('http://x/%1B\\a%0A', 'A1', 1))
     _same(mark('warn', 'x', 0), '[!] x')
     _same(paint('x', 'dim', 0), 'x')
     _same(change('due', 'a', 'b', '', 0), 'due: a -> b')
@@ -796,6 +866,7 @@ def selftest() -> int:
         'sync ' + '━' * 15 + paint('━' * 15, 'dim', 1) + ' 1/2 eta 0:03',
     )
     _same(_bar(3, None, '', 1, 80, 3725), '3 1:02:05')
+    _same(_bar(1, 9, 'a long label', 1, 10), 'a lo… 1/9')  # never as wide as the screen
     # Every tier's bar is drawable, the caller's included, and an end-capped one caps.
     for glyphs in BARS.values():
         _checked(glyphs)

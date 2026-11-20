@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.1 — 2026-11-19
+
+- Windows: a console that is not yet reading escapes (a legacy `conhost.exe` window) is switched to virtual-terminal processing when a stream is given tier 1 or 2, and gets tier 0 if it refuses. Before, the escapes printed literally there.
+- IDLE's shell gets tier 0: it claims to be a terminal and prints escapes literally.
+- `progress()`: a label too wide for the terminal is cut short with `…` instead of wrapping, which left a copy of the line behind on every redraw.
+- `progress()`: an empty write to the wrapped streams (click probes a stream with one) no longer redraws the lines.
+- `link()`: control characters in the URL are percent-encoded inside the escape, so they cannot end it early; at tier 0 a label equal to the URL prints the URL once.
+- `table()`: the soft hyphen and the Arabic number signs count as one column, as terminals draw them, not zero; the rule under the header no longer ends in spaces when the last column is empty.
+- A replaced stream whose `isatty()` or `fileno()` raises `NotImplementedError` or `OSError` is treated as not a terminal instead of raising.
+- Fixed the repository URL in the package metadata and the README's install-from-git lines (`term_style` for `term_styling`).
+
 ## 0.3.0 — 2026-11-19
 
 - Added `table()`: aligned columns that are borderless records at tier 0, with a bold header and dim rule on a terminal. Styled cells, East Asian wide characters, and multi-codepoint emoji are measured by display width. Control characters in a cell become spaces.

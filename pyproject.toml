@@ -1,6 +1,6 @@
 [project]
 name = "term-styling"
-version = "0.3.0"
+version = "0.3.1"
 description = "Terminal output tiers for CLI scripts: plain ASCII when piped, color and OSC 8 links in a terminal, Nerd Font glyphs on request."
 readme = "README.md"
 license = "Apache-2.0"
@@ -17,7 +17,7 @@ classifiers = [
 ]
 
 [project.urls]
-Repository = "https://github.com/codydunne/term_style"
+Repository = "https://github.com/codydunne/term_styling"
 
 [dependency-groups]
 # Exact pins: ty is pre-1.0 and its rules move between releases; uv.lock pins the rest.
