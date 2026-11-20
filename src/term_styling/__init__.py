@@ -81,6 +81,7 @@ def _tolerate(stream: object) -> None:
 # ENABLE_VIRTUAL_TERMINAL_PROCESSING: the console output mode that makes a Windows
 # console read escapes instead of printing them.
 _VT = 0x0004
+_INVALID_HANDLE = 6  # ERROR_INVALID_HANDLE: what GetConsoleMode says of a non-console
 
 
 def _vt(stream: object) -> bool:
@@ -89,9 +90,10 @@ def _vt(stream: object) -> bool:
     Everywhere else a terminal does. A Windows console does only in that mode: Windows
     Terminal is always in it, and a legacy conhost window is put into it here, as the
     Python 3.13 REPL and rich do, and left in it. False for a console that refuses
-    (before Windows 10 1511) and for a "terminal" that is no console at all: Windows
-    says isatty() of any character device, NUL included. A stream that cannot be asked
-    (no fileno, as in a test's stand-in) keeps the terminal's word.
+    (before Windows 10 1511) and for a character device that is no console: Windows
+    says isatty() of NUL and of a serial port too. A stream that cannot be asked keeps
+    the terminal's word: one with no fileno, or one that says isatty() over a pipe on
+    purpose (an IDE's output pane), whose reader is the terminal.
     """
     if sys.platform != 'win32':
         return True
@@ -100,19 +102,23 @@ def _vt(stream: object) -> bool:
         import msvcrt
         from ctypes import wintypes
 
-        kernel32 = ctypes.windll.kernel32
+        fd = stream.fileno()
+        # Its own handle on the library, not ctypes.windll's shared one, where another
+        # package may have set argument types that reject these calls.
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
         # A HANDLE, not the default C int: a 64-bit handle must not be truncated.
-        handle = wintypes.HANDLE(msvcrt.get_osfhandle(stream.fileno()))
+        handle = wintypes.HANDLE(msvcrt.get_osfhandle(fd))
         mode = wintypes.DWORD()
         if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
-            return False  # NUL or a serial port, not a screen
+            # Not a console at all (NUL), as opposed to a pipe, or a console handle
+            # this process may write to but not query.
+            return not (os.isatty(fd) and ctypes.get_last_error() == _INVALID_HANDLE)
         if mode.value & _VT:
             return True
         return bool(kernel32.SetConsoleMode(handle, mode.value | _VT))
     except Exception:
-        # No fileno (an in-memory stream), no console API, or argument types another
-        # library set on the shared kernel32: not a console to ask, and never worth
-        # an exception at import.
+        # No fileno (an in-memory stream) or no console API: not a console to ask,
+        # and never worth an exception at import.
         return True
 
 
@@ -435,13 +441,15 @@ def _clip(text: str, columns: int) -> str:
     A progress line wider than the terminal wraps, and a wrapped line cannot be redrawn
     in place: every redraw would leave a copy behind. Escapes are dropped from a text
     that is cut, since half of one would style or swallow the rest of the line. With
-    room for the `…` alone there is nothing worth showing.
+    room for the `…` alone there is nothing worth showing. `text` is one line, as
+    _one_line() leaves it.
     """
     if columns < 2:
         return text if _width(text) <= columns else ''
     if _width(text) <= columns:
         return text
-    text = _ESCAPE.sub('', text)
+    # Taking escapes out can leave the two halves of a new one side by side.
+    text = _CONTROL.sub(' ', _ESCAPE.sub('', text))
     # The longest prefix that leaves a column for the ellipsis. A prefix never gets
     # narrower as it grows, so halving finds it, and the longest of equal width keeps
     # an accent or a skin tone with the character it belongs to.
@@ -457,7 +465,8 @@ def _clip(text: str, columns: int) -> str:
     flags = len(cut) - len(cut.rstrip(''.join(map(chr, range(0x1F1E6, 0x1F200)))))
     if flags % 2:
         cut = cut[:-1]
-    return cut.rstrip() + '…'
+    cut = cut.rstrip()
+    return cut + '…' if cut else ''
 
 
 def _checked(bar: Sequence[str]) -> tuple[str, ...]:

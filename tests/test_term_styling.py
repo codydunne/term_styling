@@ -959,6 +959,7 @@ class FakeKernel32:
 
     def __init__(self, mode: int | None, settable: bool = True) -> None:
         self.mode, self.settable = mode, settable
+        self.error = 6  # ERROR_INVALID_HANDLE, when there is no mode to get
 
     def GetConsoleMode(self, handle: object, mode: object) -> int:
         if self.mode is None:  # not a console
@@ -983,9 +984,8 @@ def windows(clean_env: pytest.MonkeyPatch) -> Iterator[FakeKernel32]:
     wintypes = pytest.importorskip('ctypes.wintypes')
     kernel32 = FakeKernel32(0x3)
     clean_env.setattr(sys, 'platform', 'win32')
-    clean_env.setattr(
-        ctypes, 'windll', type('windll', (), {'kernel32': kernel32}), raising=False
-    )
+    clean_env.setattr(ctypes, 'WinDLL', lambda name, **_: kernel32, raising=False)
+    clean_env.setattr(ctypes, 'get_last_error', lambda: kernel32.error, raising=False)
     clean_env.setattr(ctypes, 'wintypes', wintypes, raising=False)
     msvcrt = type(sys)('msvcrt')
     msvcrt.get_osfhandle = lambda fd: 0x7FF000000000 + fd  # ty: ignore[unresolved-attribute]
@@ -1014,12 +1014,25 @@ def test_windows_console_is_left_alone_when_plain(
 
 
 def test_windows_character_device_that_is_no_console_is_plain(
-    windows: FakeKernel32,
+    windows: FakeKernel32, clean_env: pytest.MonkeyPatch
 ) -> None:
     # Windows calls NUL and a serial port terminals too; GetConsoleMode fails on them.
     windows.mode = None
+    clean_env.setattr(os, 'isatty', lambda fd: True)
     assert term_styling.tier(ConsoleTTY()) == 0
     assert term_styling.tier(Utf8TTY()) == 1  # no fileno at all: a test's stand-in
+    # A console handle that may be written but not queried is still a console.
+    windows.error = 5  # ERROR_ACCESS_DENIED
+    assert term_styling.tier(ConsoleTTY()) == 1
+
+
+def test_windows_stream_that_claims_a_terminal_over_a_pipe_keeps_its_tier(
+    windows: FakeKernel32, clean_env: pytest.MonkeyPatch
+) -> None:
+    # An IDE's output pane: isatty() is its own answer, and the descriptor is a pipe.
+    windows.mode = None
+    clean_env.setattr(os, 'isatty', lambda fd: False)
+    assert term_styling.tier(ConsoleTTY()) == 1
 
 
 def test_windows_console_calls_that_raise_keep_the_tier(
@@ -1052,6 +1065,14 @@ def test_real_windows_console_reads_escapes() -> None:
         handle = wintypes.HANDLE(msvcrt.get_osfhandle(console.fileno()))  # ty: ignore[unresolved-attribute]
         assert ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode))  # ty: ignore[unresolved-attribute]
         assert mode.value & 0x4
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='needs the real NUL device')
+def test_real_windows_nul_device_is_plain(clean_env: pytest.MonkeyPatch) -> None:
+    with open(os.devnull, 'w', encoding='utf-8') as nul:
+        assert nul.isatty()  # the claim tier() cannot take at its word
+        assert not term_styling._vt(nul)
+        assert term_styling.tier(nul) == 0
 
 
 def test_tier_of_a_stream_that_cannot_answer(clean_env: pytest.MonkeyPatch) -> None:
@@ -1124,6 +1145,10 @@ def test_table_rule_has_no_trailing_spaces() -> None:
         ('\033[1mbold label\033[0m', 5, 'bold…'),  # no half escape, no style left on
         ('\033[1mbold\033[0m', 4, '\033[1mbold\033[0m'),  # fits: untouched
         ('label', 1, ''),  # an ellipsis alone says nothing
+        ('日本語', 2, ''),
+        (' 日本', 2, ''),
+        ('\U0001f1fa\U0001f1f8abc', 2, ''),
+        ('ab\033[\033[0m1mcdef', 4, 'ab…'),  # no escape is put together by the cut
         ('a', 1, 'a'),
         ('label', 0, ''),
         ('label', -3, ''),
