@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.3.1 — 2026-11-19
+## 0.3.2 — 2026-11-19
 
-- Windows: a console that is not yet reading escapes (a legacy `conhost.exe` window) is switched to virtual-terminal processing when a stream is given tier 1 or 2, and gets tier 0 if it refuses. Before, the escapes printed literally there. A character device that is no console (`NUL`, a serial port) gets tier 0 as well.
+- Windows: a console that is not yet reading escapes (a legacy `conhost.exe` window) is switched to virtual-terminal processing (and processed output, which it needs) when a stream is given tier 1 or 2, and gets tier 0 if it refuses. Before, the escapes printed literally there. A character device that is no console (`NUL`, a serial port) gets tier 0 as well.
 - IDLE's shell gets tier 0: it claims to be a terminal and prints escapes literally.
 - `progress()`: a label too wide for the terminal is cut short with `…` instead of wrapping, which left a copy of the line behind on every redraw. (A terminal too narrow for the count itself still wraps.)
 - `progress()`: an empty write to the wrapped streams (click probes a stream with one) no longer redraws the lines.

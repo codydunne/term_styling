@@ -999,6 +999,18 @@ def test_windows_console_is_switched_to_escapes(windows: FakeKernel32) -> None:
     assert term_styling.tier(ConsoleTTY()) == 1  # already on: nothing to do
 
 
+@pytest.mark.parametrize('start', [0x2, 0x6])
+def test_windows_console_needs_processed_output_too(
+    windows: FakeKernel32, start: int
+) -> None:
+    # The VT bit alone leaves a conhost window printing escapes: both are switched on.
+    windows.mode = start
+    assert term_styling.tier(ConsoleTTY()) == 1
+    assert windows.mode == 0x7
+    windows.mode, windows.settable = start, False
+    assert term_styling.tier(ConsoleTTY()) == 0
+
+
 def test_windows_console_that_refuses_is_plain(windows: FakeKernel32) -> None:
     windows.settable = False
     assert term_styling.tier(ConsoleTTY()) == 0
@@ -1064,7 +1076,7 @@ def test_real_windows_console_reads_escapes() -> None:
         mode = wintypes.DWORD()
         handle = wintypes.HANDLE(msvcrt.get_osfhandle(console.fileno()))  # ty: ignore[unresolved-attribute]
         assert ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode))  # ty: ignore[unresolved-attribute]
-        assert mode.value & 0x4
+        assert mode.value & 0x5 == 0x5
 
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='needs the real NUL device')

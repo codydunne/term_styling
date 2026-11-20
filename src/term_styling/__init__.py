@@ -41,7 +41,7 @@ _T = TypeVar('_T')
 
 # A literal, not importlib.metadata, so a vendored copy carries its own version;
 # tests/ checks it against pyproject.toml.
-__version__ = '0.3.1'
+__version__ = '0.3.2'
 # Tier-1 characters the base SYMBOLS, divider(), and table() print. A stream whose
 # encoding cannot hold them (a Latin-1 locale, PYTHONIOENCODING=ascii) gets tier 0. Not
 # every one: only Unicode encodings hold these eight, and those hold the rest too, which
@@ -78,9 +78,10 @@ def _tolerate(stream: object) -> None:
         pass
 
 
-# ENABLE_VIRTUAL_TERMINAL_PROCESSING: the console output mode that makes a Windows
-# console read escapes instead of printing them.
-_VT = 0x0004
+# ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING: the console output
+# modes that make a Windows console read escapes instead of printing them. Both: with
+# the second alone a conhost window still prints them, which a real one showed.
+_VT = 0x0001 | 0x0004
 _INVALID_HANDLE = 6  # ERROR_INVALID_HANDLE: what GetConsoleMode says of a non-console
 
 
@@ -113,7 +114,7 @@ def _vt(stream: object) -> bool:
             # Not a console at all (NUL), as opposed to a pipe, or a console handle
             # this process may write to but not query.
             return not (os.isatty(fd) and ctypes.get_last_error() == _INVALID_HANDLE)
-        if mode.value & _VT:
+        if mode.value & _VT == _VT:
             return True
         return bool(kernel32.SetConsoleMode(handle, mode.value | _VT))
     except Exception:

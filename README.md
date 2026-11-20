@@ -42,7 +42,7 @@ In a single-file script with [PEP 723](https://peps.python.org/pep-0723/) inline
 ### From the repository
 
 For changes on `main` that are not released yet, depend on the git repository.
-Pin a release tag (`@v0.3.1`) or a full commit hash so later pushes cannot change what you get:
+Pin a release tag (`@v0.3.2`) or a full commit hash so later pushes cannot change what you get:
 
 ```bash
 uv add git+https://github.com/codydunne/term_styling --rev <tag or full commit hash>
