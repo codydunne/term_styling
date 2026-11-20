@@ -61,7 +61,7 @@ It has no imports outside the standard library, and `uv run term_styling.py` run
 
 | tier | when | output |
 |---|---|---|
-| 0 | stream is not a TTY, or is IDLE's shell; `NO_COLOR` is non-empty; `CI` is non-empty and not `false`/`0` (any case); `TERM=dumb`; or the stream's encoding cannot print every one of `✓✗⚠→—✎≡─` (a Latin-1 locale, `PYTHONIOENCODING=ascii`); or a Windows console refuses virtual-terminal processing | ASCII, no escapes; links print as `label  url` |
+| 0 | stream is not a TTY, or is IDLE's shell; `NO_COLOR` is non-empty; `CI` is non-empty and not `false`/`0` (any case); `TERM=dumb`; or the stream's encoding cannot print every one of `✓✗⚠→—✎≡─` (a Latin-1 locale, `PYTHONIOENCODING=ascii`); or, on Windows, the stream is not a console (`NUL`) or its console refuses virtual-terminal processing | ASCII, no escapes; links print as `label  url` |
 | 1 | a terminal | unicode symbols, color, OSC 8 links |
 | 2 | a terminal and `NERD_FONT=1` | as 1, with Font Awesome glyphs from a Nerd Font |
 
@@ -384,7 +384,7 @@ The recordings are kept on the [`media` branch](https://github.com/codydunne/ter
 - Column widths follow the Unicode rules, but terminals disagree about emoji: some draw a ZWJ sequence as separate glyphs or a U+FE0F symbol one column wide, and a table row holding one can be off by a column there.
 - `progress()` moves only what is written through `sys.stdout`/`sys.stderr` above its line. A `logging` handler created before the loop holds the real stream, so its records land on the line, as do `sys.stdout.buffer`, `os.write`, and a subprocess sharing the terminal.
 - A progress line starts at the left margin and erases what is there: finish a half-printed line (`print('Fetching... ', end='')`) before the loop. Inside the loop the line waits for a printed line to end, so a loop that prints dots with `end=''` shows no bar.
-- A progress label too wide for the terminal is cut short with `…` (and loses any styling); a terminal narrowed while a line is on screen still smears that one redraw.
+- A progress label too wide for the terminal is cut short with `…` (and loses any styling), but a terminal too narrow for the count itself still wraps, and a terminal narrowed while a line is on screen still smears that one redraw.
 - Nested `paint()` calls do not stack: the inner reset ends the outer color too.
 - `progress()` is a generator: after a `break` or an exception its line stays until the generator is closed. CPython closes one that nothing else refers to at once; other implementations may not, and an iterator kept in a variable is never closed for you. Use `contextlib.closing` (see [Progress](#progress)) for a guarantee.
 - Colors are the 16-color SGR set only; there is no truecolor or 256-color path.

@@ -25,6 +25,7 @@ Stdlib only, so importing it adds nothing to a script's dependencies.
 
 from __future__ import annotations
 
+import functools
 import io
 import os
 import re
@@ -87,8 +88,10 @@ def _vt(stream: object) -> bool:
 
     Everywhere else a terminal does. A Windows console does only in that mode: Windows
     Terminal is always in it, and a legacy conhost window is put into it here, as the
-    Python 3.13 REPL and rich do, and left in it. False only for a console that refuses
-    (before Windows 10 1511); anything that cannot be asked keeps the terminal's word.
+    Python 3.13 REPL and rich do, and left in it. False for a console that refuses
+    (before Windows 10 1511) and for a "terminal" that is no console at all: Windows
+    says isatty() of any character device, NUL included. A stream that cannot be asked
+    (no fileno, as in a test's stand-in) keeps the terminal's word.
     """
     if sys.platform != 'win32':
         return True
@@ -102,12 +105,14 @@ def _vt(stream: object) -> bool:
         handle = wintypes.HANDLE(msvcrt.get_osfhandle(stream.fileno()))
         mode = wintypes.DWORD()
         if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
-            return True  # a terminal, but no console: nothing to switch on
+            return False  # NUL or a serial port, not a screen
         if mode.value & _VT:
             return True
         return bool(kernel32.SetConsoleMode(handle, mode.value | _VT))
-    except (AttributeError, ImportError, NotImplementedError, OSError, ValueError):
-        # No fileno (an in-memory stream), no console API: not a console to ask.
+    except Exception:
+        # No fileno (an in-memory stream), no console API, or argument types another
+        # library set on the shared kernel32: not a console to ask, and never worth
+        # an exception at import.
         return True
 
 
@@ -210,13 +215,14 @@ def link(url: str, label: str | None = None, tier_: int | None = None) -> str:
     """`label` as a clickable OSC 8 hyperlink, degrading to plain text + the URL.
 
     A file:// target needs `wslpath -w` first under WSL, since the terminal opens links on
-    the Windows side. A control character in `url` is percent-encoded inside the escape:
-    raw, it would end the escape early and spill the rest of the URL onto the screen.
+    the Windows side. A control character in `url` is percent-encoded on a terminal,
+    in the escape and in the text shown when there is no label: raw, it would end the
+    escape early and spill the rest of the URL onto the screen. A label is the caller's.
     """
     t = TIER if tier_ is None else tier_
     if t:
         target = _CONTROL.sub(_percent, url)
-        return f'\033]8;;{target}\033\\{label or url}\033]8;;\033\\'
+        return f'\033]8;;{target}\033\\{label or target}\033]8;;\033\\'
     # A label that is the URL says it once.
     return f'{label}  {url}' if label and label != url else url
 
@@ -421,20 +427,37 @@ def _clock(seconds: float) -> str:
     return f'{hours}:{minutes:02}:{secs:02}' if hours else f'{minutes}:{secs:02}'
 
 
+# Cached: a loop's label and its terminal's width are the same at every redraw.
+@functools.lru_cache(maxsize=32)
 def _clip(text: str, columns: int) -> str:
     """`text` cut to `columns` columns at most, ending in `…` where it was cut.
 
     A progress line wider than the terminal wraps, and a wrapped line cannot be redrawn
     in place: every redraw would leave a copy behind. Escapes are dropped from a text
-    that is cut, since half of one would style or swallow the rest of the line.
+    that is cut, since half of one would style or swallow the rest of the line. With
+    room for the `…` alone there is nothing worth showing.
     """
+    if columns < 2:
+        return text if _width(text) <= columns else ''
     if _width(text) <= columns:
         return text
     text = _ESCAPE.sub('', text)
-    end = len(text)
-    while end and _width(text[:end] + '…') > columns:
-        end -= 1
-    return text[:end].rstrip() + '…' if columns > 0 else ''
+    # The longest prefix that leaves a column for the ellipsis. A prefix never gets
+    # narrower as it grows, so halving finds it, and the longest of equal width keeps
+    # an accent or a skin tone with the character it belongs to.
+    low, high = 0, len(text)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if _width(text[:middle]) < columns:
+            low = middle
+        else:
+            high = middle - 1
+    cut = text[:low]
+    # Half a flag is one regional indicator, which terminals draw as wide as the flag.
+    flags = len(cut) - len(cut.rstrip(''.join(map(chr, range(0x1F1E6, 0x1F200)))))
+    if flags % 2:
+        cut = cut[:-1]
+    return cut.rstrip() + '…'
 
 
 def _checked(bar: Sequence[str]) -> tuple[str, ...]:
@@ -609,7 +632,7 @@ class _Live:
                     sys.stderr = _Above(out)
                 try:
                     shared = sys.stdout.isatty()
-                except (AttributeError, ValueError):
+                except (AttributeError, NotImplementedError, OSError, ValueError):
                     shared = False
                 # A piped stdout is not on the screen: left alone.
                 if shared and not isinstance(sys.stdout, _Above):
@@ -837,6 +860,7 @@ def selftest() -> int:
     _same(link('http://x', 'http://x', 0), 'http://x')
     # A control character cannot end the link escape early.
     _same(link('http://x/\033\\a\n', 'A1', 1), link('http://x/%1B\\a%0A', 'A1', 1))
+    _same(link('http://x/\n', tier_=1), link('http://x/%0A', tier_=1))
     _same(mark('warn', 'x', 0), '[!] x')
     _same(paint('x', 'dim', 0), 'x')
     _same(change('due', 'a', 'b', '', 0), 'due: a -> b')

@@ -2,13 +2,13 @@
 
 ## 0.3.1 — 2026-11-19
 
-- Windows: a console that is not yet reading escapes (a legacy `conhost.exe` window) is switched to virtual-terminal processing when a stream is given tier 1 or 2, and gets tier 0 if it refuses. Before, the escapes printed literally there.
+- Windows: a console that is not yet reading escapes (a legacy `conhost.exe` window) is switched to virtual-terminal processing when a stream is given tier 1 or 2, and gets tier 0 if it refuses. Before, the escapes printed literally there. A character device that is no console (`NUL`, a serial port) gets tier 0 as well.
 - IDLE's shell gets tier 0: it claims to be a terminal and prints escapes literally.
-- `progress()`: a label too wide for the terminal is cut short with `…` instead of wrapping, which left a copy of the line behind on every redraw.
+- `progress()`: a label too wide for the terminal is cut short with `…` instead of wrapping, which left a copy of the line behind on every redraw. (A terminal too narrow for the count itself still wraps.)
 - `progress()`: an empty write to the wrapped streams (click probes a stream with one) no longer redraws the lines.
-- `link()`: control characters in the URL are percent-encoded inside the escape, so they cannot end it early; at tier 0 a label equal to the URL prints the URL once.
+- `link()`: on a terminal, control characters in the URL are percent-encoded, in the escape and in the URL shown when there is no label, so they cannot end the escape early; at tier 0 a label equal to the URL prints the URL once.
 - `table()`: the soft hyphen and the Arabic number signs count as one column, as terminals draw them, not zero; the rule under the header no longer ends in spaces when the last column is empty.
-- A replaced stream whose `isatty()` or `fileno()` raises `NotImplementedError` or `OSError` is treated as not a terminal instead of raising.
+- A replaced stream whose `isatty()` raises `NotImplementedError` or `OSError` is treated as not a terminal, and one whose `fileno()` raises `NotImplementedError` is measured as 80 columns, instead of the exception reaching the caller.
 - Fixed the repository URL in the package metadata and the README's install-from-git lines (`term_style` for `term_styling`).
 
 ## 0.3.0 — 2026-11-19

@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import unittest
 from collections.abc import Iterator
 from datetime import date
@@ -1003,19 +1004,35 @@ def test_windows_console_that_refuses_is_plain(windows: FakeKernel32) -> None:
     assert term_styling.tier(ConsoleTTY()) == 0
 
 
-def test_windows_console_is_left_alone_when_plain(windows: FakeKernel32) -> None:
+def test_windows_console_is_left_alone_when_plain(
+    windows: FakeKernel32, clean_env: pytest.MonkeyPatch
+) -> None:
     # No escapes will be sent, so the console's mode is not this module's to change.
-    os.environ['NO_COLOR'] = '1'
+    clean_env.setenv('NO_COLOR', '1')
     assert term_styling.tier(ConsoleTTY()) == 0
     assert windows.mode == 0x3
 
 
-def test_windows_terminal_without_a_console_keeps_its_tier(
+def test_windows_character_device_that_is_no_console_is_plain(
     windows: FakeKernel32,
 ) -> None:
-    windows.mode = None  # GetConsoleMode fails: a pty, not a console
+    # Windows calls NUL and a serial port terminals too; GetConsoleMode fails on them.
+    windows.mode = None
+    assert term_styling.tier(ConsoleTTY()) == 0
+    assert term_styling.tier(Utf8TTY()) == 1  # no fileno at all: a test's stand-in
+
+
+def test_windows_console_calls_that_raise_keep_the_tier(
+    windows: FakeKernel32, clean_env: pytest.MonkeyPatch
+) -> None:
+    import ctypes
+
+    def refuse(handle: object, mode: object) -> int:
+        # What ctypes raises when another library set other argtypes on kernel32.
+        raise ctypes.ArgumentError('argument 1: wrong type')
+
+    clean_env.setattr(windows, 'GetConsoleMode', refuse)
     assert term_styling.tier(ConsoleTTY()) == 1
-    assert term_styling.tier(Utf8TTY()) == 1  # no fileno at all
 
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='needs a real Windows console')
@@ -1051,6 +1068,10 @@ def test_tier_of_a_stream_that_cannot_answer(clean_env: pytest.MonkeyPatch) -> N
     assert term_styling.tier(NoDescriptor()) == 1
     clean_env.delenv('COLUMNS', raising=False)
     assert term_styling._columns(NoDescriptor()) == 80
+    # progress() asks stdout too, to decide whether to wrap it.
+    clean_env.setattr(sys, 'stdout', Replaced())
+    clean_env.setattr(sys, 'stderr', FakeTTY())
+    assert list(term_styling.progress(range(2), tier_=1)) == [0, 1]
 
 
 def test_tier_idle_shell_is_plain(clean_env: pytest.MonkeyPatch) -> None:
@@ -1062,6 +1083,10 @@ def test_link_escapes_control_characters_in_the_url() -> None:
     out = term_styling.link('http://x/a\033\\b\ac\x9cd\ne', 'A1', 1)
     assert out == '\033]8;;http://x/a%1B\\b%07c%C2%9Cd%0Ae\033\\A1\033]8;;\033\\'
     assert term_styling._width(out) == 2
+    # Without a label the URL is the text on screen, and is as safe there.
+    bare = term_styling.link('http://x/\033]8;;http://evil\033\\', tier_=1)
+    assert bare.count('\033') == 4
+    assert term_styling._width(bare) == len('http://x/%1B]8;;http://evil%1B\\')
     # Tier 0 is the caller's text, byte for byte.
     assert term_styling.link('http://x/a\nb', tier_=0) == 'http://x/a\nb'
 
@@ -1098,9 +1123,13 @@ def test_table_rule_has_no_trailing_spaces() -> None:
         ('a b c', 3, 'a…'),  # no space before the ellipsis
         ('\033[1mbold label\033[0m', 5, 'bold…'),  # no half escape, no style left on
         ('\033[1mbold\033[0m', 4, '\033[1mbold\033[0m'),  # fits: untouched
-        ('label', 1, '…'),
+        ('label', 1, ''),  # an ellipsis alone says nothing
+        ('a', 1, 'a'),
         ('label', 0, ''),
         ('label', -3, ''),
+        ('a\U0001f1fa\U0001f1f8b', 3, 'a…'),  # a flag is not cut in half
+        ('a\U0001f1fa\U0001f1f8bc', 4, 'a\U0001f1fa\U0001f1f8…'),
+        ('\U0001f44d\U0001f3fdabc', 3, '\U0001f44d\U0001f3fd…'),  # a skin tone stays
     ],
 )
 def test_clip(text: str, columns: int, clipped: str) -> None:
@@ -1117,6 +1146,16 @@ def test_progress_line_never_reaches_the_last_column(columns: int) -> None:
         assert line.endswith(tail) or ' eta ' in line
         # Where even the count does not fit there is nothing left to cut.
         assert term_styling._width(line) < max(columns, len(tail) + 1)
+
+
+def test_clip_of_a_very_long_label_is_quick() -> None:
+    # Measured on every redraw: this took seconds when it shrank one character at a time.
+    label = 'lectures/week-01.md ' * 5000
+    start = time.perf_counter()
+    for _ in range(100):
+        line = term_styling._bar(1, 9, label, 1, 40)
+    assert time.perf_counter() - start < 5
+    assert term_styling._width(line) == 39
 
 
 def test_empty_write_does_not_redraw(
