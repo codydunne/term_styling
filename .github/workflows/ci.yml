@@ -20,6 +20,15 @@ jobs:
       # Callers run the selftest under whatever flags they use; -O must not hollow it out.
       - run: uv run --locked --python ${{ matrix.python }} python -O -m term_styling
 
+  # One Windows run: the console calls in tier() and the encodings differ there.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+      - run: uv run --locked --python 3.13 pytest
+      - run: uv run --locked --python 3.13 python -m term_styling
+
   lint:
     runs-on: ubuntu-latest
     steps:

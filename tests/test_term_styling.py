@@ -9,6 +9,8 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
+import unittest
 from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
@@ -950,3 +952,266 @@ def test_readme_names_current_version():
     assert caps, 'README.md no longer shows a capped install requirement'
     for low, high in caps:
         assert _release_tuple(low) <= current < _release_tuple(high), (low, high)
+
+
+class FakeKernel32:
+    """The two Win32 console calls _vt() makes, over a console mode held here."""
+
+    def __init__(self, mode: int | None, settable: bool = True) -> None:
+        self.mode, self.settable = mode, settable
+        self.error = 6  # ERROR_INVALID_HANDLE, when there is no mode to get
+
+    def GetConsoleMode(self, handle: object, mode: object) -> int:
+        if self.mode is None:  # not a console
+            return 0
+        mode._obj.value = self.mode  # ty: ignore[unresolved-attribute]
+        return 1
+
+    def SetConsoleMode(self, handle: object, mode: int) -> int:
+        if self.settable:
+            self.mode = mode
+        return int(self.settable)
+
+
+class ConsoleTTY(Utf8TTY):
+    def fileno(self) -> int:
+        return 1
+
+
+@pytest.fixture
+def windows(clean_env: pytest.MonkeyPatch) -> Iterator[FakeKernel32]:
+    ctypes = pytest.importorskip('ctypes')
+    wintypes = pytest.importorskip('ctypes.wintypes')
+    kernel32 = FakeKernel32(0x3)
+    clean_env.setattr(sys, 'platform', 'win32')
+    clean_env.setattr(ctypes, 'WinDLL', lambda name, **_: kernel32, raising=False)
+    clean_env.setattr(ctypes, 'get_last_error', lambda: kernel32.error, raising=False)
+    clean_env.setattr(ctypes, 'wintypes', wintypes, raising=False)
+    msvcrt = type(sys)('msvcrt')
+    msvcrt.get_osfhandle = lambda fd: 0x7FF000000000 + fd  # ty: ignore[unresolved-attribute]
+    clean_env.setitem(sys.modules, 'msvcrt', msvcrt)
+    yield kernel32
+
+
+def test_windows_console_is_switched_to_escapes(windows: FakeKernel32) -> None:
+    assert term_styling.tier(ConsoleTTY()) == 1
+    assert windows.mode == 0x3 | 0x4  # the other mode bits are kept
+    assert term_styling.tier(ConsoleTTY()) == 1  # already on: nothing to do
+
+
+@pytest.mark.parametrize('start', [0x2, 0x6])
+def test_windows_console_needs_processed_output_too(
+    windows: FakeKernel32, start: int
+) -> None:
+    # The VT bit alone leaves a conhost window printing escapes: both are switched on.
+    windows.mode = start
+    assert term_styling.tier(ConsoleTTY()) == 1
+    assert windows.mode == 0x7
+    windows.mode, windows.settable = start, False
+    assert term_styling.tier(ConsoleTTY()) == 0
+
+
+def test_windows_console_that_refuses_is_plain(windows: FakeKernel32) -> None:
+    windows.settable = False
+    assert term_styling.tier(ConsoleTTY()) == 0
+
+
+def test_windows_console_is_left_alone_when_plain(
+    windows: FakeKernel32, clean_env: pytest.MonkeyPatch
+) -> None:
+    # No escapes will be sent, so the console's mode is not this module's to change.
+    clean_env.setenv('NO_COLOR', '1')
+    assert term_styling.tier(ConsoleTTY()) == 0
+    assert windows.mode == 0x3
+
+
+def test_windows_character_device_that_is_no_console_is_plain(
+    windows: FakeKernel32, clean_env: pytest.MonkeyPatch
+) -> None:
+    # Windows calls NUL and a serial port terminals too; GetConsoleMode fails on them.
+    windows.mode = None
+    clean_env.setattr(os, 'isatty', lambda fd: True)
+    assert term_styling.tier(ConsoleTTY()) == 0
+    assert term_styling.tier(Utf8TTY()) == 1  # no fileno at all: a test's stand-in
+    # A console handle that may be written but not queried is still a console.
+    windows.error = 5  # ERROR_ACCESS_DENIED
+    assert term_styling.tier(ConsoleTTY()) == 1
+
+
+def test_windows_stream_that_claims_a_terminal_over_a_pipe_keeps_its_tier(
+    windows: FakeKernel32, clean_env: pytest.MonkeyPatch
+) -> None:
+    # An IDE's output pane: isatty() is its own answer, and the descriptor is a pipe.
+    windows.mode = None
+    clean_env.setattr(os, 'isatty', lambda fd: False)
+    assert term_styling.tier(ConsoleTTY()) == 1
+
+
+def test_windows_console_calls_that_raise_keep_the_tier(
+    windows: FakeKernel32, clean_env: pytest.MonkeyPatch
+) -> None:
+    import ctypes
+
+    def refuse(handle: object, mode: object) -> int:
+        # What ctypes raises when another library set other argtypes on kernel32.
+        raise ctypes.ArgumentError('argument 1: wrong type')
+
+    clean_env.setattr(windows, 'GetConsoleMode', refuse)
+    assert term_styling.tier(ConsoleTTY()) == 1
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='needs a real Windows console')
+def test_real_windows_console_reads_escapes() -> None:
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    try:
+        console = open('CONOUT$', 'w', encoding='utf-8')
+    except OSError:
+        # Not pytest.skip(): ty resolves its signature differently per Python version.
+        raise unittest.SkipTest('this process has no console') from None
+    with console:
+        assert term_styling._vt(console)
+        mode = wintypes.DWORD()
+        handle = wintypes.HANDLE(msvcrt.get_osfhandle(console.fileno()))  # ty: ignore[unresolved-attribute]
+        assert ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode))  # ty: ignore[unresolved-attribute]
+        assert mode.value & 0x5 == 0x5
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='needs the real NUL device')
+def test_real_windows_nul_device_is_plain(clean_env: pytest.MonkeyPatch) -> None:
+    with open(os.devnull, 'w', encoding='utf-8') as nul:
+        assert nul.isatty()  # the claim tier() cannot take at its word
+        assert not term_styling._vt(nul)
+        assert term_styling.tier(nul) == 0
+
+
+def test_tier_of_a_stream_that_cannot_answer(clean_env: pytest.MonkeyPatch) -> None:
+    class Replaced(io.StringIO):
+        def isatty(self) -> bool:
+            raise NotImplementedError
+
+    assert term_styling.tier(Replaced()) == 0
+
+    class NoDescriptor(FakeTTY):
+        def fileno(self) -> int:
+            raise NotImplementedError
+
+    assert term_styling.tier(NoDescriptor()) == 1
+    clean_env.delenv('COLUMNS', raising=False)
+    assert term_styling._columns(NoDescriptor()) == 80
+    # progress() asks stdout too, to decide whether to wrap it.
+    clean_env.setattr(sys, 'stdout', Replaced())
+    clean_env.setattr(sys, 'stderr', FakeTTY())
+    assert list(term_styling.progress(range(2), tier_=1)) == [0, 1]
+
+
+def test_tier_idle_shell_is_plain(clean_env: pytest.MonkeyPatch) -> None:
+    shell = type('StdOutputFile', (FakeTTY,), {'__module__': 'idlelib.run'})
+    assert term_styling.tier(shell()) == 0
+
+
+def test_link_escapes_control_characters_in_the_url() -> None:
+    out = term_styling.link('http://x/a\033\\b\ac\x9cd\ne', 'A1', 1)
+    assert out == '\033]8;;http://x/a%1B\\b%07c%C2%9Cd%0Ae\033\\A1\033]8;;\033\\'
+    assert term_styling._width(out) == 2
+    # Without a label the URL is the text on screen, and is as safe there.
+    bare = term_styling.link('http://x/\033]8;;http://evil\033\\', tier_=1)
+    assert bare.count('\033') == 4
+    assert term_styling._width(bare) == len('http://x/%1B]8;;http://evil%1B\\')
+    # Tier 0 is the caller's text, byte for byte.
+    assert term_styling.link('http://x/a\nb', tier_=0) == 'http://x/a\nb'
+
+
+def test_link_label_equal_to_the_url_prints_once() -> None:
+    assert term_styling.link('http://x', 'http://x', 0) == 'http://x'
+    assert term_styling.link('http://x', '', 0) == 'http://x'
+
+
+@pytest.mark.parametrize(
+    ('text', 'width'),
+    [
+        ('co\xadop', 5),  # a soft hyphen is drawn
+        ('\u0600\u0661', 2),  # Arabic number sign
+        ('a\u200bb\u2060c\ufeff', 3),  # zero width space, word joiner, BOM: not drawn
+    ],
+)
+def test_width_of_format_characters(text: str, width: int) -> None:
+    assert term_styling._width(text) == width
+
+
+def test_table_rule_has_no_trailing_spaces() -> None:
+    lines = term_styling.table([('a', '')], ('id', ''), tier_=1).splitlines()
+    assert lines[1] == '\033[2m──\033[0m'
+
+
+@pytest.mark.parametrize(
+    ('text', 'columns', 'clipped'),
+    [
+        ('uploading', 9, 'uploading'),
+        ('uploading', 8, 'uploadi…'),
+        ('日本語のラベル', 6, '日本…'),  # a wide character is never cut in half
+        ('e\u0301e\u0301e\u0301', 2, 'e\u0301…'),  # an accent stays with its letter
+        ('a b c', 3, 'a…'),  # no space before the ellipsis
+        ('\033[1mbold label\033[0m', 5, 'bold…'),  # no half escape, no style left on
+        ('\033[1mbold\033[0m', 4, '\033[1mbold\033[0m'),  # fits: untouched
+        ('label', 1, ''),  # an ellipsis alone says nothing
+        ('日本語', 2, ''),
+        (' 日本', 2, ''),
+        ('\U0001f1fa\U0001f1f8abc', 2, ''),
+        ('ab\033[\033[0m1mcdef', 4, 'ab…'),  # no escape is put together by the cut
+        ('a', 1, 'a'),
+        ('label', 0, ''),
+        ('label', -3, ''),
+        ('a\U0001f1fa\U0001f1f8b', 3, 'a…'),  # a flag is not cut in half
+        ('a\U0001f1fa\U0001f1f8bc', 4, 'a\U0001f1fa\U0001f1f8…'),
+        ('\U0001f44d\U0001f3fdabc', 3, '\U0001f44d\U0001f3fd…'),  # a skin tone stays
+    ],
+)
+def test_clip(text: str, columns: int, clipped: str) -> None:
+    assert term_styling._clip(text, columns) == clipped
+    assert term_styling._width(clipped) <= max(columns, 0)
+
+
+@pytest.mark.parametrize('columns', range(1, 60))
+def test_progress_line_never_reaches_the_last_column(columns: int) -> None:
+    label = 'uploading lecture recordings 日本語'
+    for done, total in ((0, 40), (12, 40), (40, 40), (7, None)):
+        line = term_styling._bar(done, total, label, 1, columns, 65)
+        tail = f'{done}/{total}' if total else f'{done} 1:05'
+        assert line.endswith(tail) or ' eta ' in line
+        # Where even the count does not fit there is nothing left to cut.
+        assert term_styling._width(line) < max(columns, len(tail) + 1)
+
+
+def test_clip_of_a_very_long_label_is_quick() -> None:
+    # Measured on every redraw: this took seconds when it shrank one character at a time.
+    label = 'lectures/week-01.md ' * 5000
+    start = time.perf_counter()
+    for _ in range(100):
+        line = term_styling._bar(1, 9, label, 1, 40)
+    assert time.perf_counter() - start < 5
+    assert term_styling._width(line) == 39
+
+
+def test_empty_write_does_not_redraw(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    screen = FakeTTY()
+    monkeypatch.setattr(sys, 'stderr', screen)
+    for _ in term_styling.progress(range(1), tier_=1):
+        before = screen.getvalue()
+        assert sys.stderr.write('') == 0
+        assert screen.getvalue() == before
+        print('half', end='', file=sys.stderr)
+        sys.stderr.write('')  # ...and does not end a half-printed line
+        assert term_styling._LIVE.midline
+        print(file=sys.stderr)
+
+
+def test_repository_urls_name_this_repository() -> None:
+    urls = importlib.metadata.metadata('term-styling').get_all('Project-URL') or []
+    assert 'Repository, https://github.com/codydunne/term_styling' in urls
+    readme = (REPO / 'README.md').read_text(encoding='utf-8')
+    assert set(re.findall(r'github\.com/codydunne/(\w+)', readme)) == {'term_styling'}

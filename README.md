@@ -42,14 +42,14 @@ In a single-file script with [PEP 723](https://peps.python.org/pep-0723/) inline
 ### From the repository
 
 For changes on `main` that are not released yet, depend on the git repository.
-Pin a release tag (`@v0.3.0`) or a full commit hash so later pushes cannot change what you get:
+Pin a release tag (`@v0.3.2`) or a full commit hash so later pushes cannot change what you get:
 
 ```bash
-uv add git+https://github.com/codydunne/term_style --rev <tag or full commit hash>
+uv add git+https://github.com/codydunne/term_styling --rev <tag or full commit hash>
 ```
 
 ```python
-# dependencies = ["term-styling @ git+https://github.com/codydunne/term_style@<tag or full commit hash>"]
+# dependencies = ["term-styling @ git+https://github.com/codydunne/term_styling@<tag or full commit hash>"]
 ```
 
 ### Vendored
@@ -61,7 +61,7 @@ It has no imports outside the standard library, and `uv run term_styling.py` run
 
 | tier | when | output |
 |---|---|---|
-| 0 | stream is not a TTY; `NO_COLOR` is non-empty; `CI` is non-empty and not `false`/`0` (any case); `TERM=dumb`; or the stream's encoding cannot print every one of `✓✗⚠→—✎≡─` (a Latin-1 locale, `PYTHONIOENCODING=ascii`) | ASCII, no escapes; links print as `label  url` |
+| 0 | stream is not a TTY, or is IDLE's shell; `NO_COLOR` is non-empty; `CI` is non-empty and not `false`/`0` (any case); `TERM=dumb`; or the stream's encoding cannot print every one of `✓✗⚠→—✎≡─` (a Latin-1 locale, `PYTHONIOENCODING=ascii`); or, on Windows, the stream is not a console (`NUL`) or its console refuses virtual-terminal processing | ASCII, no escapes; links print as `label  url` |
 | 1 | a terminal | unicode symbols, color, OSC 8 links |
 | 2 | a terminal and `NERD_FONT=1` | as 1, with Font Awesome glyphs from a Nerd Font |
 
@@ -122,6 +122,10 @@ Over SSH or in WSL the font is the local terminal's; only the variable needs set
 
 A `sys.stdout` or `sys.stderr` whose encoding cannot print those symbols, and whose errors handler is still the default `strict`, is switched to `errors='backslashreplace'` on import.
 Tier 0 keeps this module's own output ASCII, but a caller's text (a title with an em dash) would otherwise still raise `UnicodeEncodeError` on the next `print()`; it prints as `\u2014` instead.
+
+On Windows, a console stream that would get tier 1 or 2 but is not reading escapes yet (a legacy `conhost.exe` window) is switched to virtual-terminal processing, as the Python 3.13 REPL does, and stays switched after the script exits.
+Windows Terminal and VS Code's terminal are already in that mode and are not touched; `NO_COLOR=1` skips the switch along with the escapes.
+
 `link`, `paint`, `mark`, `change`, `divider`, and `table` take an optional `tier_` and otherwise use `TIER`; `skip`, `error`, `warn`, and `die` write to stderr at `ERR_TIER`, and so does `progress`, which takes a `tier_` of its own.
 
 ## Usage
@@ -244,7 +248,7 @@ with closing(term_styling.progress(paths, 'uploading')) as items:
 `total` defaults to `len(items)`; an iterator without a length shows a running count and the time elapsed, with no bar.
 The estimate is the mean pace so far.
 Redraws for finished items are capped at ten a second; each line printed inside the loop costs one more.
-The line is as wide as stderr's terminal allows (or `COLUMNS`), whatever stdout is.
+The line is as wide as stderr's terminal allows (or `COLUMNS`), whatever stdout is, and a label that does not fit is cut short.
 If the terminal stops accepting writes, the drawing stops and the loop carries on.
 
 While a loop runs, `sys.stderr` is replaced by a thin stand-in, and `sys.stdout` too when it is a terminal, so anything printed inside the loop appears above the line and both streams are restored afterwards.
@@ -375,13 +379,13 @@ The recordings are kept on the [`media` branch](https://github.com/codydunne/ter
 
 ## Known limitations
 
-- Windows consoles that do not enable virtual-terminal processing (legacy `conhost.exe` without it turned on) print the escapes literally; Windows Terminal and VS Code's terminal are fine.
-  `NO_COLOR=1` is the workaround.
-  Not handled in code: turning VT processing on takes Win32 console calls, and nothing here tests them yet.
+- The Windows console switch (see [Import side effects](#import-side-effects)) is tested against a stand-in for the Win32 calls and on CI's Windows runner, not in a real legacy `conhost.exe` window. If escapes still print literally there, `NO_COLOR=1` is the workaround.
+- A legacy Windows console ignores OSC 8 links (the label still prints) and may lack the glyphs for some symbols in its font.
 - Column widths follow the Unicode rules, but terminals disagree about emoji: some draw a ZWJ sequence as separate glyphs or a U+FE0F symbol one column wide, and a table row holding one can be off by a column there.
 - `progress()` moves only what is written through `sys.stdout`/`sys.stderr` above its line. A `logging` handler created before the loop holds the real stream, so its records land on the line, as do `sys.stdout.buffer`, `os.write`, and a subprocess sharing the terminal.
 - A progress line starts at the left margin and erases what is there: finish a half-printed line (`print('Fetching... ', end='')`) before the loop. Inside the loop the line waits for a printed line to end, so a loop that prints dots with `end=''` shows no bar.
-- A label wider than the terminal smears the redraw.
+- A progress label too wide for the terminal is cut short with `…` (and loses any styling), but a terminal too narrow for the count itself still wraps, and a terminal narrowed while a line is on screen still smears that one redraw.
+- Nested `paint()` calls do not stack: the inner reset ends the outer color too.
 - `progress()` is a generator: after a `break` or an exception its line stays until the generator is closed. CPython closes one that nothing else refers to at once; other implementations may not, and an iterator kept in a variable is never closed for you. Use `contextlib.closing` (see [Progress](#progress)) for a guarantee.
 - Colors are the 16-color SGR set only; there is no truecolor or 256-color path.
 - The encoding probe covers the base symbols (the progress bar's `━` is outside it and falls back to `─`). A caller's own symbols outside that set (`●`, say) are not checked, though in practice any encoding that prints all of the base set is a Unicode one.
